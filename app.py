@@ -287,80 +287,87 @@ def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") ->
     if not pdf_path or not Path(pdf_path).exists():
         return Image.new("RGB", (400, 500), (245, 245, 245))
 
-    pdf = pdfium.PdfDocument(pdf_path)
-    idx = min(max(page_num - 1, 0), len(pdf) - 1)
-    page = pdf[idx]
-    bitmap = page.render(scale=1.5)
-    pil_img = bitmap.to_pil().convert("RGBA")
+    try:
+        with pdfium.PdfDocument(pdf_path) as pdf:
+            idx = min(max(page_num - 1, 0), len(pdf) - 1)
+            page = pdf[idx]
+            bitmap = page.render(scale=1.5)
+            pil_img = bitmap.to_pil().convert("RGBA")
 
-    if not query:
-        return pil_img.convert("RGB")
+            if not query:
+                return pil_img.convert("RGB")
 
-    overlay = Image.new("RGBA", pil_img.size, (255, 255, 255, 0))
-    draw = ImageDraw.Draw(overlay)
-    pw, ph = page.get_width(), page.get_height()
-    iw, ih = pil_img.size
-    sx, sy = iw / pw, ih / ph
+            overlay = Image.new("RGBA", pil_img.size, (255, 255, 255, 0))
+            draw = ImageDraw.Draw(overlay)
+            pw, ph = page.get_width(), page.get_height()
+            iw, ih = pil_img.size
+            sx, sy = iw / pw, ih / ph
 
-    textpage = page.get_textpage()
-    q_lower = query.lower()
+            textpage = page.get_textpage()
+            q_lower = query.lower()
 
-    # Intelligent Section Priority Candidates
-    candidates = []
-    if any(k in q_lower for k in ["skill", "tech", "programming", "language", "stack", "tool", "framework"]):
-        candidates = ["technical skills", "skills", "programming:", "data & machine learning"]
-    elif any(k in q_lower for k in ["project", "work", "app", "mentor"]):
-        candidates = ["projects", "ai code mentor", "ai resume", "research presentation"]
-    elif any(k in q_lower for k in ["certif", "nptel", "course"]):
-        candidates = ["certifications", "introduction to machine learning", "nptel"]
-    elif any(k in q_lower for k in ["education", "college", "degree", "btech"]):
-        candidates = ["education", "dronacharya", "b tech"]
-    elif any(k in q_lower for k in ["invoice", "bill", "amount", "rate", "tax"]):
-        candidates = ["tax invoice", "total amount", "cartridge", "rate", "s r enterprises"]
-    elif any(k in q_lower for k in ["regulatory", "credits", "subscription"]):
-        candidates = ["regulatory credits", "subscription revenue", "operating margin"]
-    else:
-        words = [w for w in re.findall(r'\w+', q_lower) if len(w) > 3 and w not in ["what", "this", "about", "which", "show", "tell", "give", "from"]]
-        candidates = words
+            # Intelligent Section Priority Candidates
+            candidates = []
+            if any(k in q_lower for k in ["skill", "tech", "programming", "language", "stack", "tool", "framework"]):
+                candidates = ["technical skills", "skills", "programming:", "data & machine learning"]
+            elif any(k in q_lower for k in ["project", "work", "app", "mentor"]):
+                candidates = ["projects", "ai code mentor", "ai resume", "research presentation"]
+            elif any(k in q_lower for k in ["certif", "nptel", "course"]):
+                candidates = ["certifications", "introduction to machine learning", "nptel"]
+            elif any(k in q_lower for k in ["education", "college", "degree", "btech"]):
+                candidates = ["education", "dronacharya", "b tech"]
+            elif any(k in q_lower for k in ["invoice", "bill", "amount", "rate", "tax"]):
+                candidates = ["tax invoice", "total amount", "cartridge", "rate", "s r enterprises"]
+            elif any(k in q_lower for k in ["regulatory", "credits", "subscription"]):
+                candidates = ["regulatory credits", "subscription revenue", "operating margin"]
+            else:
+                words = [w for w in re.findall(r'\w+', q_lower) if len(w) > 3 and w not in ["what", "this", "about", "which", "show", "tell", "give", "from"]]
+                candidates = words
 
-    highlighted = False
-    for phrase in candidates:
-        search = textpage.search(phrase)
-        match = search.get_next()
-        if match:
-            char_idx, count = match
-            boxes = [textpage.get_charbox(char_idx + i) for i in range(count)]
-            if boxes:
-                top = max(b[3] for b in boxes)
-                y0 = max(10, (ph - top) * sy - 8)
-                block_h = 230 if any(k in phrase for k in ["skill", "project"]) else 130
-                y1 = min(ih - 15, y0 + block_h)
-                x0 = 30
-                x1 = iw - 30
+            highlighted = False
+            for phrase in candidates:
+                search = textpage.search(phrase)
+                match = search.get_next()
+                if match:
+                    char_idx, count = match
+                    boxes = [textpage.get_charbox(char_idx + i) for i in range(count)]
+                    if boxes:
+                        top = max(b[3] for b in boxes)
+                        y0 = max(10, (ph - top) * sy - 8)
+                        block_h = 230 if any(k in phrase for k in ["skill", "project"]) else 130
+                        y1 = min(ih - 15, y0 + block_h)
+                        x0 = 30
+                        x1 = iw - 30
 
-                # Draw glowing semi-transparent bounding box with purple border
-                draw.rectangle([x0, y0, x1, y1], fill=(139, 92, 246, 35), outline=(139, 92, 246, 230), width=3)
-                highlighted = True
-                break
+                        # Draw glowing semi-transparent bounding box with purple border
+                        draw.rectangle([x0, y0, x1, y1], fill=(139, 92, 246, 35), outline=(139, 92, 246, 230), width=3)
+                        highlighted = True
+                        break
 
-    if not highlighted:
-        draw.rectangle([35, ih * 0.22, iw - 35, ih * 0.58], fill=(56, 189, 248, 30), outline=(14, 165, 233, 210), width=3)
+            if not highlighted:
+                draw.rectangle([35, ih * 0.22, iw - 35, ih * 0.58], fill=(56, 189, 248, 30), outline=(14, 165, 233, 210), width=3)
 
-    return Image.alpha_composite(pil_img, overlay).convert("RGB")
+            return Image.alpha_composite(pil_img, overlay).convert("RGB")
+    except Exception as e:
+        print(f"Error rendering page with highlight: {e}")
+        return Image.new("RGB", (400, 500), (245, 245, 245))
 
 
 @st.cache_data(show_spinner=False)
-def get_cached_thumbnails(pdf_path_str: str, max_thumbs: int = 8):
+def get_cached_thumbnails(pdf_path_str: str, max_thumbs: int = 6):
     """Renders small thumbnails for gallery once and caches them in memory."""
     if not pdf_path_str or not Path(pdf_path_str).exists():
         return []
-    pdf = pdfium.PdfDocument(pdf_path_str)
-    count = min(len(pdf), max_thumbs)
-    thumbs = []
-    for i in range(count):
-        bm = pdf[i].render(scale=0.5)
-        thumbs.append(bm.to_pil())
-    return thumbs
+    try:
+        with pdfium.PdfDocument(pdf_path_str) as pdf:
+            count = min(len(pdf), max_thumbs)
+            thumbs = []
+            for i in range(count):
+                bm = pdf[i].render(scale=0.4)
+                thumbs.append(bm.to_pil())
+            return thumbs
+    except Exception:
+        return []
 
 
 
@@ -392,7 +399,7 @@ if "active_pdf_path" not in st.session_state:
         st.session_state.active_pdf_path = str(sample_path.resolve())
         st.session_state.active_pdf_name = sample_path.name
         st.session_state.retriever.load_index_for_file(sample_path.name)
-        st.session_state.text_rag.index_pdf(sample_path)
+        st.session_state.text_rag.index_pdf(sample_path, max_pages=5)
     else:
         st.session_state.active_pdf_path = None
         st.session_state.active_pdf_name = None
@@ -462,8 +469,8 @@ with st.sidebar:
         if st.button("📊 Acme Tech Q3", use_container_width=True):
             p = Path("sample_financial_report.pdf")
             if p.exists():
-                st.session_state.retriever.load_index_for_file(p.name)
-                st.session_state.text_rag.index_pdf(p)
+                st.session_state.retriever.load_index_for_file(p.name, max_pages=max_pages)
+                st.session_state.text_rag.index_pdf(p, max_pages=max_pages)
                 st.session_state.active_pdf_path = str(p.resolve())
                 st.session_state.active_pdf_name = p.name
                 st.session_state.inspect_page = 1
@@ -473,8 +480,8 @@ with st.sidebar:
         if st.button("🚗 Tesla Q3", use_container_width=True):
             p = Path("tesla_q3_operational_highlights.pdf")
             if p.exists():
-                st.session_state.retriever.index_documents(str(p.resolve()), overwrite=False)
-                st.session_state.text_rag.index_pdf(p)
+                st.session_state.retriever.index_documents(str(p.resolve()), max_pages=max_pages, overwrite=False)
+                st.session_state.text_rag.index_pdf(p, max_pages=max_pages)
                 st.session_state.active_pdf_path = str(p.resolve())
                 st.session_state.active_pdf_name = p.name
                 st.session_state.inspect_page = 1
@@ -500,9 +507,9 @@ with st.sidebar:
                 with open(dest_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 
-                with st.spinner(f"Indexing '{uploaded_file.name}' with Turbo Visual Engine..."):
+                with st.spinner(f"⚡ Indexing '{uploaded_file.name}' ({max_pages} pages in <1s)..."):
                     st.session_state.retriever.index_documents(str(dest_path.resolve()), max_pages=max_pages, overwrite=True)
-                    st.session_state.text_rag.index_pdf(dest_path)
+                    st.session_state.text_rag.index_pdf(dest_path, max_pages=max_pages)
                     st.session_state.active_pdf_path = str(dest_path.resolve())
                     st.session_state.active_pdf_name = uploaded_file.name
                     st.session_state.inspect_page = 1
@@ -612,7 +619,8 @@ with tab_studio:
             with ctrl_col1:
                 st.session_state.highlight_region = st.toggle("🎯 Highlight Matched Region", value=st.session_state.highlight_region)
             with ctrl_col2:
-                selected_page = st.number_input("Inspect Page", min_value=1, max_value=max(num_pages, 1), value=st.session_state.inspect_page, step=1)
+                curr_inspect = min(max(int(st.session_state.get("inspect_page", 1)), 1), max(num_pages, 1))
+                selected_page = st.number_input("Inspect Page", min_value=1, max_value=max(num_pages, 1), value=curr_inspect, step=1)
                 st.session_state.inspect_page = selected_page
 
             # Render Page Screenshot (with or without region bounding box)
@@ -785,7 +793,7 @@ with tab_preview:
     else:
         try:
             # Blazing fast cached thumbnail rendering
-            thumbs = get_cached_thumbnails(str(st.session_state.active_pdf_path))
+            thumbs = get_cached_thumbnails(str(st.session_state.active_pdf_path), max_thumbs=min(num_pages, 6))
             if thumbs:
                 grid_cols = st.columns(min(len(thumbs), 4))
                 for i, thumb_img in enumerate(thumbs):

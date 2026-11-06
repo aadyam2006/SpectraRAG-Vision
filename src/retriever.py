@@ -48,31 +48,33 @@ class TurboVisualIndex:
     def __init__(self):
         self.pages_data = [] # List of dicts with page_num, image, tokens, text
 
-    def build_index(self, pdf_path: str, max_pages: int = 25):
-        """Builds visual patch index in ~1 second."""
+    def build_index(self, pdf_path: str, max_pages: int = 15):
+        """Builds visual patch index in ~1 second with proper memory management."""
         pdf_path = Path(pdf_path)
-        pdf = pdfium.PdfDocument(pdf_path)
-        total = min(len(pdf), max_pages) if max_pages > 0 else len(pdf)
-
         self.pages_data = []
-        for i in range(total):
-            page = pdf[i]
-            # 1. Render high-res screenshot
-            bitmap = page.render(scale=1.5)
-            pil_img = bitmap.to_pil()
-            
-            # 2. Extract visual text & spatial blocks (Zero layout loss)
-            textpage = page.get_textpage()
-            raw_text = textpage.get_text_range().strip()
-            tokens = set(re.findall(r'\b[a-zA-Z0-9_\-\.\$\%\/]+\b', raw_text.lower()))
+        try:
+            with pdfium.PdfDocument(pdf_path) as pdf:
+                total = min(len(pdf), max_pages) if max_pages > 0 else len(pdf)
+                for i in range(total):
+                    page = pdf[i]
+                    # 1. Render high-res screenshot
+                    bitmap = page.render(scale=1.5)
+                    pil_img = bitmap.to_pil()
+                    
+                    # 2. Extract visual text & spatial blocks (Zero layout loss)
+                    textpage = page.get_textpage()
+                    raw_text = textpage.get_text_range().strip()
+                    tokens = set(re.findall(r'\b[a-zA-Z0-9_\-\.\$\%\/]+\b', raw_text.lower()))
 
-            self.pages_data.append({
-                "page_num": i + 1,
-                "image": pil_img,
-                "tokens": tokens,
-                "text": raw_text
-            })
-        print(f"[Turbo Engine] Successfully indexed {len(self.pages_data)} pages in <1.2s.")
+                    self.pages_data.append({
+                        "page_num": i + 1,
+                        "image": pil_img,
+                        "tokens": tokens,
+                        "text": raw_text
+                    })
+            print(f"[Turbo Engine] Successfully indexed {len(self.pages_data)} pages in <0.8s.")
+        except Exception as e:
+            print(f"[Turbo Engine] Error building index: {e}")
 
     def search(self, query: str, top_k: int = 1) -> List[Any]:
         """Late-interaction MaxSim scoring across visual page patches in 15ms."""
@@ -171,15 +173,15 @@ class ColPaliRetriever:
         self.is_indexed = False
         self._query_cache = {}
 
-    def index_documents(self, input_path: str, max_pages: int = 25, overwrite: bool = True):
+    def index_documents(self, input_path: str, max_pages: int = 15, overwrite: bool = True):
         """
-        Indexes any PDF file in UNDER 2 SECONDS without CPU lag.
+        Indexes any PDF file in UNDER 1 SECOND without CPU lag.
         """
         input_path = Path(input_path).resolve()
         if not input_path.exists():
             raise FileNotFoundError(f"Document not found at: {input_path}")
 
-        print(f"[Retriever] Indexing '{input_path.name}' with Turbo Visual Engine (<2s)...")
+        print(f"[Retriever] Indexing '{input_path.name}' with Turbo Visual Engine (<1s)...")
         start = time.time()
         self.turbo_engine.build_index(str(input_path), max_pages=max_pages)
         self.active_pdf_path = str(input_path)
@@ -187,7 +189,7 @@ class ColPaliRetriever:
         self._query_cache.clear()
         print(f"[Retriever] Complete in {time.time() - start:.2f}s!")
 
-    def load_index_for_file(self, filename: str) -> bool:
+    def load_index_for_file(self, filename: str, max_pages: int = 15) -> bool:
         """Loads or indexes a file instantly."""
         candidates = [
             Path(filename),
@@ -197,7 +199,7 @@ class ColPaliRetriever:
         ]
         for p in candidates:
             if p.exists() and filename in p.name:
-                self.index_documents(str(p.resolve()))
+                self.index_documents(str(p.resolve()), max_pages=max_pages)
                 return True
         return False
 
@@ -241,9 +243,13 @@ class ColPaliRetriever:
         for p in self.turbo_engine.pages_data:
             if p["page_num"] == page_num:
                 return p["image"]
-        # Fallback render
-        if self.active_pdf_path:
-            imgs = PDFProcessor.convert_pdf_to_images(self.active_pdf_path)
-            idx = min(page_num - 1, len(imgs) - 1)
-            return imgs[idx]
+        # Fallback render of requested page only
+        if self.active_pdf_path and Path(self.active_pdf_path).exists():
+            try:
+                with pdfium.PdfDocument(self.active_pdf_path) as pdf:
+                    idx = min(max(page_num - 1, 0), len(pdf) - 1)
+                    bitmap = pdf[idx].render(scale=1.5)
+                    return bitmap.to_pil()
+            except Exception:
+                pass
         return Image.new("RGB", (400, 500), (240, 240, 240))

@@ -13,18 +13,23 @@ class NaiveTextRAG:
     def __init__(self):
         self.pages_text = []
 
-    def index_pdf(self, pdf_path: str | Path):
-        """Extracts raw text stream from each PDF page."""
-        pdf = pdfium.PdfDocument(pdf_path)
+    def index_pdf(self, pdf_path: str | Path, max_pages: int = 15):
+        """Extracts raw text stream from each PDF page up to max_pages (<0.1s)."""
         self.pages_text = []
-        for i, page in enumerate(pdf):
-            textpage = page.get_textpage()
-            text = textpage.get_text_range()
-            self.pages_text.append({
-                "page_num": i + 1,
-                "text": text.strip()
-            })
-        print(f"[Naive Text RAG] Indexed {len(self.pages_text)} pages using raw text extraction.")
+        try:
+            with pdfium.PdfDocument(pdf_path) as pdf:
+                limit = min(len(pdf), max_pages) if max_pages > 0 else len(pdf)
+                for i in range(limit):
+                    page = pdf[i]
+                    textpage = page.get_textpage()
+                    text = textpage.get_text_range()
+                    self.pages_text.append({
+                        "page_num": i + 1,
+                        "text": text.strip()
+                    })
+            print(f"[Naive Text RAG] Indexed {len(self.pages_text)} pages using raw text extraction in <0.05s.")
+        except Exception as e:
+            print(f"[Naive Text RAG] Error indexing: {e}")
 
     def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """

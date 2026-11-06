@@ -489,6 +489,13 @@ with tab_studio:
                 with chip_col2:
                     if st.button("💰 Total amount & GST rate?", use_container_width=True):
                         sample_query = "What is the total invoice amount and GST tax rate applied?"
+            elif "resume" in active_file_name.lower() or "cv" in active_file_name.lower():
+                with chip_col1:
+                    if st.button("💻 What are the technical skills?", use_container_width=True):
+                        sample_query = "what are the tech skills?"
+                with chip_col2:
+                    if st.button("🚀 What projects are listed?", use_container_width=True):
+                        sample_query = "what projects did she do?"
             else:
                 with chip_col1:
                     if st.button("📈 Regulatory credits revenue & YoY?", use_container_width=True):

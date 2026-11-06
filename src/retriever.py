@@ -121,6 +121,43 @@ class TurboVisualIndex:
         
         return results
 
+    def search_all_pages(self, query: str) -> List[Dict[str, Any]]:
+        """Returns scores and metadata for every indexed page in order."""
+        if not self.pages_data:
+            return []
+        
+        raw_words = re.findall(r'\b[a-zA-Z0-9_\-\.\$\%\/]+\b', query.lower())
+        content_words = [w for w in raw_words if w not in STOPWORDS] or raw_words
+        expanded_query = set(content_words)
+        for w in content_words:
+            if w in SYNONYMS:
+                expanded_query.update(SYNONYMS[w])
+
+        all_page_metrics = []
+        for p in self.pages_data:
+            tokens = p["tokens"]
+            page_text = p["text"].lower()
+            sim_score = 0.0
+            for qw in expanded_query:
+                if qw in tokens:
+                    sim_score += 4.0
+                elif any(qw in t for t in tokens):
+                    sim_score += 1.8
+                elif qw in page_text:
+                    sim_score += 1.2
+            content_density = min(len(tokens) / 30.0, 3.0)
+            final_raw = sim_score + content_density
+            score = round(20.0 + min(final_raw * 1.5, 12.0), 2)
+            snippet = p["text"][:80].replace("\n", " ").strip() if p["text"] else "Visual Chart / Table"
+            all_page_metrics.append({
+                "page_num": p["page_num"],
+                "score": score,
+                "tokens": len(tokens),
+                "snippet": snippet
+            })
+        return all_page_metrics
+
+
 
 class ColPaliRetriever:
     def __init__(self, model_name: str = "vidore/colpali-v1.2", index_root: str = ".byaldi"):
@@ -178,6 +215,26 @@ class ColPaliRetriever:
         results = self.turbo_engine.search(query=query, top_k=top_k)
         self._query_cache[cache_key] = results
         return results
+
+    def search_all_pages(self, query: str) -> List[Dict[str, Any]]:
+        """Returns all page scores for dashboard charts."""
+        if not self.is_indexed:
+            return []
+        return self.turbo_engine.search_all_pages(query)
+
+    def get_all_pages_info(self) -> List[Dict[str, Any]]:
+        """Returns info on all indexed pages for dashboard."""
+        info = []
+        for p in self.turbo_engine.pages_data:
+            snippet = p["text"][:80].replace("\n", " ").strip() if p["text"] else "Visual Chart / Table"
+            info.append({
+                "page_num": p["page_num"],
+                "score": 20.0 + min(len(p["tokens"]) / 10.0, 6.0),
+                "tokens": len(p["tokens"]),
+                "snippet": snippet
+            })
+        return info
+
 
     def get_page_image(self, page_num: int) -> Image.Image:
         """Returns the high-res screenshot for a specific page."""

@@ -275,19 +275,8 @@ def render_circular_ring(pct: int, label: str, sublabel: str, color: str) -> str
     r = 38
     c = 2 * math.pi * r
     offset = c * (1 - (min(pct, 100) / 100.0))
-    return f"""
-    <div style="text-align: center; display: flex; flex-direction: column; align-items: center;">
-        <svg width="86" height="86" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="{r}" fill="none" stroke="#F1F5F9" stroke-width="8" />
-            <circle cx="50" cy="50" r="{r}" fill="none" stroke="{color}" stroke-width="8"
-                    stroke-dasharray="{c:.2f}" stroke-dashoffset="{offset:.2f}"
-                    stroke-linecap="round" transform="rotate(-90 50 50)" />
-            <text x="50" y="56" text-anchor="middle" font-family="'Plus Jakarta Sans', sans-serif" 
-                  font-size="16" font-weight="800" fill="#0F172A">{label}</text>
-        </svg>
-        <div style="font-size: 11px; font-weight: 600; color: #64748B; margin-top: 4px;">{sublabel}</div>
-    </div>
-    """
+    return f'<div style="text-align: center; display: inline-block; margin: 0 8px;"><svg width="86" height="86" viewBox="0 0 100 100"><circle cx="50" cy="50" r="{r}" fill="none" stroke="#F1F5F9" stroke-width="8" /><circle cx="50" cy="50" r="{r}" fill="none" stroke="{color}" stroke-width="8" stroke-dasharray="{c:.2f}" stroke-dashoffset="{offset:.2f}" stroke-linecap="round" transform="rotate(-90 50 50)" /><text x="50" y="56" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="800" fill="#0F172A">{label}</text></svg><div style="font-size: 11px; font-weight: 600; color: #64748B; margin-top: 4px;">{sublabel}</div></div>'
+
 
 
 def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") -> Image.Image:
@@ -898,47 +887,37 @@ with tab_analytics:
             {"page_num": i + 1, "score": 20.0 + (i * 2.5), "tokens": 40 + i * 15, "snippet": f"Document Page {i+1}"}
             for i in range(num_pages)
         ]
-    max_score = max([s["score"] for s in all_scores]) if all_scores else 30.0
 
     with col_chart_left:
-        st.markdown("""
-        <div class="outstaff-card">
-            <div class="card-title">
-                <span>Time & Page Relevance Distribution</span>
-                <span class="pill pill-cyan">ColPali MaxSim</span>
-            </div>
-            <div class="card-subtitle">Visual patch late-interaction density across document pages</div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Time & Page Relevance Distribution</span><span class="pill pill-cyan">ColPali MaxSim</span></div><div class="card-subtitle">Visual patch late-interaction density across document pages</div>', unsafe_allow_html=True)
 
-        capsule_html = '<div class="capsule-group">'
-        for item in all_scores[:7]:
-            p_num = item["page_num"]
-            p_score = item["score"]
-            fill_pct = int((p_score / max(max_score, 1.0)) * 100)
-            is_top = (p_num == st.session_state.last_top_page)
-            fill_class = "capsule-fill highlight" if is_top else "capsule-fill"
-            capsule_html += f"""
-            <div class="capsule-col">
-                <div class="capsule-val">{p_score:.1f}</div>
-                <div class="capsule-track">
-                    <div class="{fill_class}" style="height: {fill_pct}%;"></div>
-                </div>
-                <div class="capsule-lbl">P{p_num}</div>
-            </div>
-            """
-        capsule_html += '</div>'
-        st.markdown(capsule_html, unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        bar_df = pd.DataFrame([
+            {
+                "Page": f"P{item['page_num']}",
+                "MaxSim Score": item["score"],
+                "Type": "Top Match" if item["page_num"] == st.session_state.last_top_page else "Indexed Page"
+            }
+            for item in all_scores[:7]
+        ])
+
+        capsule_chart = alt.Chart(bar_df).mark_bar(
+            cornerRadiusTopLeft=12,
+            cornerRadiusTopRight=12,
+            cornerRadiusBottomLeft=12,
+            cornerRadiusBottomRight=12,
+            width=28
+        ).encode(
+            x=alt.X("Page:N", title=None, axis=alt.Axis(labelColor="#64748B", labelFontSize=12, grid=False)),
+            y=alt.Y("MaxSim Score:Q", title="MaxSim Points", axis=alt.Axis(labelColor="#64748B", grid=True, gridColor="#F1F5F9")),
+            color=alt.Color("Type:N", scale=alt.Scale(domain=["Top Match", "Indexed Page"], range=["#0284C7", "#7DD3FC"]), legend=None),
+            tooltip=["Page", "MaxSim Score", "Type"]
+        ).properties(height=140)
+
+        st.altair_chart(capsule_chart.configure_view(strokeWidth=0), use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col_chart_right:
-        st.markdown("""
-        <div class="outstaff-card">
-            <div class="card-title">
-                <span>Task Patch Activation Energy</span>
-                <span class="pill pill-todo">Spline Wave</span>
-            </div>
-            <div class="card-subtitle">Query token late-interaction activations across 1,024 patches</div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Task Patch Activation Energy</span><span class="pill pill-todo">Spline Wave</span></div><div class="card-subtitle">Query token late-interaction activations across 1,024 patches</div>', unsafe_allow_html=True)
 
         token_words = [w for w in st.session_state.last_query.split() if len(w) > 2][:7]
         if not token_words:
@@ -979,115 +958,35 @@ with tab_analytics:
     col_table_left, col_widgets_right = st.columns([1.1, 1], gap="medium")
 
     with col_table_left:
-        st.markdown("""
-        <div class="outstaff-card">
-            <div class="card-title">
-                <span>Last Tasks & Document Sections</span>
-                <div style="display: flex; gap: 6px;">
-                    <span class="pill pill-done">Active</span>
-                    <span class="pill pill-cyan">Zero-OCR</span>
-                </div>
-            </div>
-            <div class="card-subtitle">Multi-page layout inspection and patch token counts</div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Last Tasks & Document Sections</span><div style="display: flex; gap: 6px;"><span class="pill pill-done">Active</span><span class="pill pill-cyan">Zero-OCR</span></div></div><div class="card-subtitle">Multi-page layout inspection and patch token counts</div>', unsafe_allow_html=True)
 
-        table_html = """
-        <table class="task-table">
-            <thead>
-                <tr>
-                    <th>Page</th>
-                    <th>Detected Content / Snippet</th>
-                    <th>Status</th>
-                    <th>Score</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
-        for item in all_scores[:6]:
-            p_num = item["page_num"]
-            snippet = item.get("snippet", "Table / Multi-Column Text")
-            if len(snippet) > 40:
-                snippet = snippet[:38] + "..."
-            score = item["score"]
-            is_top = (p_num == st.session_state.last_top_page)
-            status_pill = '<span class="pill pill-todo">Top Match</span>' if is_top else '<span class="pill pill-done">Indexed</span>'
-
-            table_html += f"""
-            <tr>
-                <td style="font-weight: 700; color: #0F172A;">P{p_num}</td>
-                <td style="color: #475569; font-size: 12px;">{snippet}</td>
-                <td>{status_pill}</td>
-                <td style="font-weight: 700; color: #0284C7;">{score:.1f}</td>
-            </tr>
-            """
-        table_html += "</tbody></table>"
-        st.markdown(table_html, unsafe_allow_html=True)
+        table_df = pd.DataFrame([
+            {
+                "Page": f"Page {item['page_num']}",
+                "Detected Section / Content": item.get("snippet", "Table / Content")[:40],
+                "Tokens": item.get("tokens", 50),
+                "Status": "🎯 Top Match" if item["page_num"] == st.session_state.last_top_page else "✅ Indexed",
+                "MaxSim Score": f"{item['score']:.1f} pts"
+            }
+            for item in all_scores[:6]
+        ])
+        st.dataframe(table_df, use_container_width=True, hide_index=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_widgets_right:
-        st.markdown("""
-        <div class="outstaff-card">
-            <div class="card-title">
-                <span>Progress</span>
-                <span class="pill pill-done">Healthy</span>
-            </div>
-            <div class="card-subtitle">Retrieval telemetry and visual embedding fidelity</div>
-        """, unsafe_allow_html=True)
-
         ring1 = render_circular_ring(94, "94%", "Semantic Alignment", "#8B5CF6")
         ring2 = render_circular_ring(85, f"{st.session_state.last_retrieval_ms}ms", "Retrieval Speed", "#3B82F6")
         ring3 = render_circular_ring(100, "100%", "Zero-OCR Fidelity", "#06B6D4")
 
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-around; align-items: center; padding: 10px 0;">
-            {ring1}
-            {ring2}
-            {ring3}
-        </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="outstaff-card"><div class="card-title"><span>Progress</span><span class="pill pill-done">Healthy</span></div><div class="card-subtitle">Retrieval telemetry and visual embedding fidelity</div><div style="display: flex; justify-content: space-around; align-items: center; padding: 10px 0;">{ring1}{ring2}{ring3}</div></div>', unsafe_allow_html=True)
 
         col_dark, col_achieve = st.columns(2, gap="small")
         with col_dark:
-            st.markdown(f"""
-            <div class="dark-metric-card">
-                <div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Per Page Patches</div>
-                <div style="font-size: 26px; font-weight: 800; color: #FFFFFF; margin: 4px 0;">1,024+</div>
-                <div style="display: flex; gap: 3px; align-items: flex-end; height: 20px; margin-bottom: 12px;">
-                    <div style="width: 4px; height: 12px; background: #38BDF8; border-radius: 2px;"></div>
-                    <div style="width: 4px; height: 18px; background: #38BDF8; border-radius: 2px;"></div>
-                    <div style="width: 4px; height: 20px; background: #38BDF8; border-radius: 2px;"></div>
-                    <div style="width: 4px; height: 15px; background: #38BDF8; border-radius: 2px;"></div>
-                </div>
-                <div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Search Latency</div>
-                <div style="font-size: 22px; font-weight: 800; color: #34D399; margin: 2px 0;">{st.session_state.last_retrieval_ms} ms</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="dark-metric-card"><div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Per Page Patches</div><div style="font-size: 26px; font-weight: 800; color: #FFFFFF; margin: 4px 0;">1,024+</div><div style="display: flex; gap: 3px; align-items: flex-end; height: 18px; margin-bottom: 12px;"><div style="width: 4px; height: 10px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 16px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 18px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 14px; background: #38BDF8; border-radius: 2px;"></div></div><div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Search Latency</div><div style="font-size: 22px; font-weight: 800; color: #34D399; margin: 2px 0;">{st.session_state.last_retrieval_ms} ms</div></div>', unsafe_allow_html=True)
 
         with col_achieve:
-            st.markdown("""
-            <div class="outstaff-card" style="padding: 16px; height: 100%;">
-                <div style="font-size: 13px; font-weight: 800; color: #0F172A; margin-bottom: 10px;">Key Features</div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <div style="background: #E0F2FE; border-radius: 12px; padding: 10px; text-align: center;">
-                        <span style="font-size: 18px;">📄</span>
-                        <div style="font-size: 10px; font-weight: 700; color: #0369A1;">Zero-OCR</div>
-                    </div>
-                    <div style="background: #EDE9FE; border-radius: 12px; padding: 10px; text-align: center;">
-                        <span style="font-size: 18px;">⚡</span>
-                        <div style="font-size: 10px; font-weight: 700; color: #6D28D9;">15ms CPU</div>
-                    </div>
-                    <div style="background: #D1FAE5; border-radius: 12px; padding: 10px; text-align: center;">
-                        <span style="font-size: 18px;">🎯</span>
-                        <div style="font-size: 10px; font-weight: 700; color: #047857;">MaxSim</div>
-                    </div>
-                    <div style="background: #FEF3C7; border-radius: 12px; padding: 10px; text-align: center;">
-                        <span style="font-size: 18px;">💬</span>
-                        <div style="font-size: 10px; font-weight: 700; color: #B45309;">Grounded</div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="outstaff-card" style="padding: 16px; height: 100%;"><div style="font-size: 13px; font-weight: 800; color: #0F172A; margin-bottom: 10px;">Key Features</div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"><div style="background: #E0F2FE; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">📄</span><div style="font-size: 10px; font-weight: 700; color: #0369A1;">Zero-OCR</div></div><div style="background: #EDE9FE; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">⚡</span><div style="font-size: 10px; font-weight: 700; color: #6D28D9;">15ms CPU</div></div><div style="background: #D1FAE5; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">🎯</span><div style="font-size: 10px; font-weight: 700; color: #047857;">MaxSim</div></div><div style="background: #FEF3C7; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">💬</span><div style="font-size: 10px; font-weight: 700; color: #B45309;">Grounded</div></div></div></div>', unsafe_allow_html=True)
+
 
 
 # ==============================================================================

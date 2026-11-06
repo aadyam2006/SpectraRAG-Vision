@@ -1,0 +1,26 @@
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ColPali & Byaldi index data
+.byaldi/
+*.index
+data/indices/
+data/input_pdfs/*
+!data/input_pdfs/sample_financial_report.pdf
+
+
+# OS and IDE files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

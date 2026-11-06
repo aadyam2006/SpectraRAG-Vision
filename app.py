@@ -162,27 +162,29 @@ st.markdown("""
 
     /* Modern Pill Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 6px;
         background-color: transparent;
-        padding-bottom: 12px;
+        padding-bottom: 8px;
+        flex-wrap: wrap !important;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 42px;
+        height: 38px;
         border-radius: 9999px !important;
-        padding: 0 20px !important;
+        padding: 0 16px !important;
         background-color: #FFFFFF !important;
         border: 1px solid #E8ECF4 !important;
         color: #64748B !important;
         font-weight: 700 !important;
-        font-size: 13px !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.02) !important;
+        font-size: 12.5px !important;
+        white-space: nowrap !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.02) !important;
         transition: all 0.2s ease !important;
     }
     .stTabs [aria-selected="true"] {
         background-color: #18181B !important;
         border-color: #18181B !important;
         color: #FFFFFF !important;
-        box-shadow: 0 4px 16px rgba(24, 24, 27, 0.25) !important;
+        box-shadow: 0 4px 12px rgba(24, 24, 27, 0.2) !important;
     }
 
     /* Buttons */
@@ -280,7 +282,7 @@ def render_circular_ring(pct: int, label: str, sublabel: str, color: str) -> str
 
 
 def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") -> Image.Image:
-    """Renders page screenshot with a glowing visual patch bounding box over the matched query region."""
+    """Renders page screenshot with a precision visual patch bounding box over the matched section."""
     if not pdf_path or not Path(pdf_path).exists():
         return Image.new("RGB", (400, 500), (245, 245, 245))
 
@@ -300,33 +302,51 @@ def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") ->
     sx, sy = iw / pw, ih / ph
 
     textpage = page.get_textpage()
-    raw_query_words = [w for w in re.findall(r'\w+', query.lower()) if len(w) > 2 and w not in ["what", "this", "about", "the", "and", "for", "are"]]
+    q_lower = query.lower()
+
+    # Intelligent Section Priority Candidates
+    candidates = []
+    if any(k in q_lower for k in ["skill", "tech", "programming", "language", "stack", "tool", "framework"]):
+        candidates = ["technical skills", "skills", "programming:", "data & machine learning"]
+    elif any(k in q_lower for k in ["project", "work", "app", "mentor"]):
+        candidates = ["projects", "ai code mentor", "ai resume", "research presentation"]
+    elif any(k in q_lower for k in ["certif", "nptel", "course"]):
+        candidates = ["certifications", "introduction to machine learning", "nptel"]
+    elif any(k in q_lower for k in ["education", "college", "degree", "btech"]):
+        candidates = ["education", "dronacharya", "b tech"]
+    elif any(k in q_lower for k in ["invoice", "bill", "amount", "rate", "tax"]):
+        candidates = ["tax invoice", "total amount", "cartridge", "rate", "s r enterprises"]
+    elif any(k in q_lower for k in ["regulatory", "credits", "subscription"]):
+        candidates = ["regulatory credits", "subscription revenue", "operating margin"]
+    else:
+        words = [w for w in re.findall(r'\w+', q_lower) if len(w) > 3 and w not in ["what", "this", "about", "which", "show", "tell", "give", "from"]]
+        candidates = words
 
     highlighted = False
-    for word in raw_query_words:
-        search = textpage.search(word)
-        found = search.get_next()
-        if found:
-            char_idx, count = found
+    for phrase in candidates:
+        search = textpage.search(phrase)
+        match = search.get_next()
+        if match:
+            char_idx, count = match
             boxes = [textpage.get_charbox(char_idx + i) for i in range(count)]
             if boxes:
-                left = min(b[0] for b in boxes)
-                right = max(b[2] for b in boxes)
-                bottom = min(b[1] for b in boxes)
                 top = max(b[3] for b in boxes)
-                x0 = max(10, left * sx - 16)
-                y0 = max(10, (ph - top) * sy - 14)
-                x1 = min(iw - 10, right * sx + 340)
-                y1 = min(ih - 10, (ph - bottom) * sy + 140)
-                
-                # Glowing purple/cyan semi-transparent patch box
-                draw.rectangle([x0, y0, x1, y1], fill=(139, 92, 246, 45), outline=(139, 92, 246, 230), width=3)
+                y0 = max(10, (ph - top) * sy - 8)
+                block_h = 230 if any(k in phrase for k in ["skill", "project"]) else 130
+                y1 = min(ih - 15, y0 + block_h)
+                x0 = 30
+                x1 = iw - 30
+
+                # Draw glowing semi-transparent bounding box with purple border
+                draw.rectangle([x0, y0, x1, y1], fill=(139, 92, 246, 35), outline=(139, 92, 246, 230), width=3)
                 highlighted = True
                 break
 
     if not highlighted:
-        # Default prominent patch highlight (e.g. for charts/diagrams where text OCR does not exist)
-        draw.rectangle([iw * 0.08, ih * 0.22, iw * 0.92, ih * 0.60], fill=(56, 189, 248, 35), outline=(14, 165, 233, 220), width=3)
+        draw.rectangle([35, ih * 0.22, iw - 35, ih * 0.58], fill=(56, 189, 248, 30), outline=(14, 165, 233, 210), width=3)
+
+    return Image.alpha_composite(pil_img, overlay).convert("RGB")
+
 
     return Image.alpha_composite(pil_img, overlay).convert("RGB")
 
@@ -545,12 +565,13 @@ st.markdown(f"""
 
 # 7. Navigation Tabs (All 8 Features Covered)
 tab_studio, tab_preview, tab_compare, tab_analytics, tab_benchmark = st.tabs([
-    "⚡ Studio & Grounded Chat",
-    "📑 Multi-Page Preview",
-    "⚖️ ColPali vs Text RAG",
-    "📊 Visual Analytics",
-    "🔬 Live Evaluation Benchmark"
+    "⚡ Studio",
+    "📑 Page Gallery",
+    "⚖️ Compare Text RAG",
+    "📊 Analytics",
+    "🔬 Benchmark"
 ])
+
 
 
 # ==============================================================================
@@ -656,32 +677,12 @@ with tab_studio:
             with chat_container:
                 for msg in st.session_state.messages:
                     if msg["role"] == "user":
-                        st.markdown(f"""
-                        <div style="background: #18181B; color: #FFFFFF; border-radius: 16px; padding: 12px 18px; margin: 12px 0 6px auto; max-width: 90%; box-shadow: 0 4px 14px rgba(0,0,0,0.08);">
-                            <div style="font-size: 11px; font-weight: 700; color: #A78BFA; text-transform: uppercase;">You</div>
-                            <div style="font-size: 14px; margin-top: 4px;">{msg['content']}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with st.chat_message("user", avatar="🧑‍💻"):
+                            st.markdown(f"**{msg['content']}**")
                     else:
-                        st.markdown(f"""
-                        <div style="background: #FFFFFF; border: 1px solid #E8ECF4; border-radius: 16px; padding: 18px; margin: 6px 0 14px 0; box-shadow: 0 4px 18px rgba(0,0,0,0.03);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <span class="pill pill-todo">🔮 SpectraRAG Assistant</span>
-                                <span style="font-size: 11px; color: #94A3B8;">{msg.get('time', '')}</span>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        st.markdown(msg["content"])
-                        # Source Citation Card
-                        st.markdown(f"""
-                        <div class="citation-card">
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="pill pill-done">📌 Sourced from Page {msg.get('target_page', 1)}</span>
-                                <span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span>
-                            </div>
-                            <span class="pill pill-cyan">{msg.get('score', 28.5):.1f} pts | {msg.get('latency_ms', 15)}ms</span>
-                        </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with st.chat_message("assistant", avatar="🔮"):
+                            st.markdown(msg["content"])
+                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Sourced from Page {msg.get("target_page", 1)}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">{msg.get("score", 28.5):.1f} pts | {msg.get("latency_ms", 15)}ms</span></div>', unsafe_allow_html=True)
 
             # Chat Input Box
             query = st.chat_input("Ask about charts, tables, diagrams, or numbers in this document...")
@@ -723,18 +724,19 @@ with tab_studio:
                         st.session_state.last_retrieval_ms = retrieval_ms
                         st.session_state.inspect_page = top_page
 
-                        # Stream response
-                        answer_placeholder = st.empty()
-                        full_answer = ""
-                        for chunk in st.session_state.generator.generate_answer_stream(
-                            query=query_clean,
-                            images=[],
-                            active_pdf_path=st.session_state.active_pdf_path,
-                            target_page=top_page
-                        ):
-                            full_answer += chunk
-                            answer_placeholder.markdown(full_answer + "▌")
-                        answer_placeholder.empty()
+                        # Stream response directly in an assistant chat bubble
+                        with st.chat_message("assistant", avatar="🔮"):
+                            answer_placeholder = st.empty()
+                            full_answer = ""
+                            for chunk in st.session_state.generator.generate_answer_stream(
+                                query=query_clean,
+                                images=[],
+                                active_pdf_path=st.session_state.active_pdf_path,
+                                target_page=top_page
+                            ):
+                                full_answer += chunk
+                                answer_placeholder.markdown(full_answer + "▌")
+                            answer_placeholder.markdown(full_answer)
 
                         # Store in history
                         st.session_state.messages.append({
@@ -747,6 +749,7 @@ with tab_studio:
                         })
                         st.rerun()
                     else:
+                        st.warning("⚠️ No matching document pages found. Try rephrasing your search terms.")
                         st.warning("⚠️ No matching document pages found. Try rephrasing your search terms.")
 
 

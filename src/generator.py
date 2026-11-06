@@ -325,12 +325,13 @@ class MultimodalGenerator:
             )
 
 
-        # Smooth ChatGPT-like token streaming
+        # Fast, silky token streaming (<0.2s)
         words = response_text.split(" ")
         for i, word in enumerate(words):
             yield word + " "
-            if i % 3 == 0:
-                time.sleep(0.015)
+            if i % 4 == 0:
+                time.sleep(0.005)
+
 
     def _stream_ollama(self, query: str, images: List[Image.Image]) -> Generator[str, None, None]:
         """Streams from local Ollama model."""

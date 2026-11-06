@@ -281,8 +281,9 @@ def render_circular_ring(pct: int, label: str, sublabel: str, color: str) -> str
 
 
 
+@st.cache_data(show_spinner=False)
 def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") -> Image.Image:
-    """Renders page screenshot with a precision visual patch bounding box over the matched section."""
+    """Renders page screenshot with a precision visual patch bounding box over the matched section (Cached)."""
     if not pdf_path or not Path(pdf_path).exists():
         return Image.new("RGB", (400, 500), (245, 245, 245))
 
@@ -348,7 +349,19 @@ def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") ->
     return Image.alpha_composite(pil_img, overlay).convert("RGB")
 
 
-    return Image.alpha_composite(pil_img, overlay).convert("RGB")
+@st.cache_data(show_spinner=False)
+def get_cached_thumbnails(pdf_path_str: str, max_thumbs: int = 8):
+    """Renders small thumbnails for gallery once and caches them in memory."""
+    if not pdf_path_str or not Path(pdf_path_str).exists():
+        return []
+    pdf = pdfium.PdfDocument(pdf_path_str)
+    count = min(len(pdf), max_thumbs)
+    thumbs = []
+    for i in range(count):
+        bm = pdf[i].render(scale=0.5)
+        thumbs.append(bm.to_pil())
+    return thumbs
+
 
 
 # 4. State Initialization
@@ -737,6 +750,9 @@ with tab_studio:
                                 full_answer += chunk
                                 answer_placeholder.markdown(full_answer + "▌")
                             answer_placeholder.markdown(full_answer)
+                            
+                            # Instant citation pill below streamed answer
+                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Sourced from Page {top_page}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">{top_score:.1f} pts | {retrieval_ms}ms</span></div>', unsafe_allow_html=True)
 
                         # Store in history
                         st.session_state.messages.append({
@@ -747,9 +763,7 @@ with tab_studio:
                             "latency_ms": retrieval_ms,
                             "time": now_str
                         })
-                        st.rerun()
                     else:
-                        st.warning("⚠️ No matching document pages found. Try rephrasing your search terms.")
                         st.warning("⚠️ No matching document pages found. Try rephrasing your search terms.")
 
 
@@ -769,38 +783,34 @@ with tab_preview:
     if not st.session_state.active_pdf_path:
         st.info("👈 Upload or select a PDF to preview pages.")
     else:
-        pdf_path = Path(st.session_state.active_pdf_path)
         try:
-            pdf = pdfium.PdfDocument(pdf_path)
-            total_doc_pages = len(pdf)
-
-            # Display thumbnail cards in a responsive grid
-            grid_cols = st.columns(min(total_doc_pages, 4))
-            for i in range(total_doc_pages):
-                col = grid_cols[i % len(grid_cols)]
-                with col:
-                    page_bitmap = pdf[i].render(scale=0.6)
-                    thumb_img = page_bitmap.to_pil()
-                    page_num = i + 1
-
-                    st.markdown(f"""
-                    <div class="page-thumb-card">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span class="pill pill-todo">Page {page_num}</span>
-                            <span style="font-size: 11px; font-weight: 700; color: #0284C7;">144 DPI</span>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    st.image(thumb_img, use_container_width=True)
-                    
-                    if st.button(f"🔍 Inspect Page {page_num}", key=f"inspect_btn_{page_num}", use_container_width=True):
-                        st.session_state.inspect_page = page_num
-                        st.toast(f"Switched view to Page {page_num}")
-                        st.rerun()
-                    st.markdown("</div>", unsafe_allow_html=True)
+            # Blazing fast cached thumbnail rendering
+            thumbs = get_cached_thumbnails(str(st.session_state.active_pdf_path))
+            if thumbs:
+                grid_cols = st.columns(min(len(thumbs), 4))
+                for i, thumb_img in enumerate(thumbs):
+                    col = grid_cols[i % len(grid_cols)]
+                    with col:
+                        page_num = i + 1
+                        st.markdown(f"""
+                        <div class="page-thumb-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span class="pill pill-todo">Page {page_num}</span>
+                                <span style="font-size: 11px; font-weight: 700; color: #0284C7;">144 DPI</span>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        st.image(thumb_img, use_container_width=True)
+                        
+                        if st.button(f"🔍 Inspect Page {page_num}", key=f"inspect_btn_{page_num}", use_container_width=True):
+                            st.session_state.inspect_page = page_num
+                            st.toast(f"Switched view to Page {page_num}")
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Error loading page thumbnails: {e}")
 
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 # ==============================================================================

@@ -11,7 +11,7 @@ import time
 import base64
 import re
 from pathlib import Path
-from typing import List, Generator
+from typing import List, Generator, Any, Optional
 from PIL import Image
 import pypdfium2 as pdfium
 
@@ -37,21 +37,23 @@ class MultimodalGenerator:
         images: List[Image.Image],
         active_pdf_path: str = "",
         target_page: int = 1,
+        retriever: Any = None,
         *args,
         **kwargs
     ) -> Generator[str, None, None]:
         """
         Streams answers grounded in the provided page screenshots.
         """
-        # Resolve target page if passed in kwargs
         if "target_page" in kwargs:
             target_page = kwargs["target_page"]
         if "active_pdf_path" in kwargs:
             active_pdf_path = kwargs["active_pdf_path"]
+        if "retriever" in kwargs and kwargs["retriever"]:
+            retriever = kwargs["retriever"]
 
         # 1. FAST DEMO MODE: Instant, deterministic, zero-lag streaming on CPU
         if self.mode == "fast_demo":
-            yield from self._stream_fast_demo(query, images, active_pdf_path, target_page)
+            yield from self._stream_fast_demo(query, images, active_pdf_path, target_page, retriever=retriever)
             return
 
         # 2. GEMINI CLOUD API MODE (if selected & API key present)
@@ -62,25 +64,37 @@ class MultimodalGenerator:
         # 3. OLLAMA LOCAL MODE
         yield from self._stream_ollama(query, images)
 
-    def _stream_fast_demo(self, query: str, images: List[Image.Image], active_pdf_path: str = "", target_page: int = 1) -> Generator[str, None, None]:
-        """Instant streaming generator providing rich, query-grounded executive briefings on ANY PDF."""
+    def _stream_fast_demo(
+        self,
+        query: str,
+        images: List[Image.Image],
+        active_pdf_path: str = "",
+        target_page: int = 1,
+        retriever: Any = None
+    ) -> Generator[str, None, None]:
+        """Instant streaming generator providing rich, query-grounded executive briefings in <0.2s."""
         q_lower = query.lower()
         page_num = target_page
 
-        # 1. Extract text from the active PDF target page and surrounding pages
+        # 1. Fast in-memory text retrieval from retriever (0ms)
         page_lines = []
         raw_page_text = ""
         full_doc_text = ""
         filename = Path(active_pdf_path).name.lower() if active_pdf_path else ""
 
-        if active_pdf_path and pdfium:
+        if retriever and hasattr(retriever, "get_page_text"):
+            raw_page_text = retriever.get_page_text(target_page)
+            full_doc_text = retriever.get_all_doc_text()
+            page_lines = [l.strip() for l in raw_page_text.split("\n") if l.strip()]
+
+        if not raw_page_text and active_pdf_path and pdfium and Path(active_pdf_path).exists():
             try:
-                pdf = pdfium.PdfDocument(active_pdf_path)
-                p_idx = min(max(target_page - 1, 0), len(pdf) - 1)
-                raw_page_text = pdf[p_idx].get_textpage().get_text_range()
-                page_lines = [l.strip() for l in raw_page_text.split("\n") if l.strip()]
-                for i in range(min(len(pdf), 5)):
-                    full_doc_text += " " + pdf[i].get_textpage().get_text_range()
+                with pdfium.PdfDocument(active_pdf_path) as pdf:
+                    p_idx = min(max(target_page - 1, 0), len(pdf) - 1)
+                    raw_page_text = pdf[p_idx].get_textpage().get_text_range()
+                    page_lines = [l.strip() for l in raw_page_text.split("\n") if l.strip()]
+                    for i in range(min(len(pdf), 5)):
+                        full_doc_text += " " + pdf[i].get_textpage().get_text_range()
             except Exception:
                 pass
 
@@ -337,12 +351,12 @@ class MultimodalGenerator:
             )
 
 
-        # Fast, silky token streaming (<0.2s)
+        # Silky smooth phrase-chunked streaming (fast & does not freeze browser WebSocket)
         words = response_text.split(" ")
-        for i, word in enumerate(words):
-            yield word + " "
-            if i % 4 == 0:
-                time.sleep(0.005)
+        for i in range(0, len(words), 3):
+            chunk = " ".join(words[i:i+3]) + " "
+            yield chunk
+            time.sleep(0.012)
 
 
     def _stream_ollama(self, query: str, images: List[Image.Image]) -> Generator[str, None, None]:

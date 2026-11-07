@@ -1,5 +1,13 @@
 # 🔮 SpectraRAG Vision: Local Multimodal Document Intelligence
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aadyam2006-spectrarag-vision-app-iy5r2d.streamlit.app/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![ColPali v1.2](https://img.shields.io/badge/ColPali-v1.2%20Late--Interaction-8A2BE2.svg)](https://huggingface.co/vidore/colpali-v1.2)
+
+> 🚀 **Live Interactive Demo:** **[aadyam2006-spectrarag-vision-app-iy5r2d.streamlit.app ↗](https://aadyam2006-spectrarag-vision-app-iy5r2d.streamlit.app/)**  
+> *Click the link above to test the live studio directly in your browser without any installation!*
+
 An enterprise-grade, local Multimodal Retrieval-Augmented Generation (RAG) system that replaces fragile text-extraction and OCR pipelines with visual document representations (**ColPali v1.2 late-interaction**) and on-device Vision-Language Models (**LLaVA / Qwen2-VL**).
 
 ---
@@ -147,16 +155,24 @@ Demonstrating engineering maturity by analyzing real-world edge cases where late
 
 ---
 
-## 🚀 Quickstart & How to Run
+## 🚀 Quickstart & How to Access
 
-### 1. Set Up Environment
+### 🌐 Option 1: Live Web App (Instant Access — Zero Setup)
+Open the deployed application directly in your browser:  
+👉 **[Launch SpectraRAG Vision Studio ↗](https://aadyam2006-spectrarag-vision-app-iy5r2d.streamlit.app/)**
+
+---
+
+### 💻 Option 2: Run Locally on Workstation
+
+#### 1. Set Up Environment
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Interactive Dashboard
+#### 2. Launch the Interactive Dashboard
 ```powershell
 streamlit run app.py
 ```

@@ -1,15 +1,11 @@
-"""
-src/baseline_text_rag.py - Traditional Text-Based PDF RAG baseline for comparison.
-Extracts raw text from PDF and performs keyword/token overlap search.
-Demonstrates why traditional text RAG fails on charts and tables.
-"""
+"""Toy keyword-overlap PDF search baseline (not a BM25 implementation)."""
 
 from pathlib import Path
 from typing import List, Dict, Any
 import pypdfium2 as pdfium
 
 
-class NaiveTextRAG:
+class KeywordOverlapBaseline:
     def __init__(self):
         self.pages_text = []
 
@@ -33,8 +29,8 @@ class NaiveTextRAG:
 
     def search(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """
-        Simple BM25-style term frequency search over raw extracted page text.
-        Fails on charts, graphical diagrams, and broken table layouts.
+        Simple term-frequency overlap over raw extracted page text.
+        This baseline does not interpret chart or diagram pixels.
         """
         query_words = set(query.lower().split())
         scored_pages = []

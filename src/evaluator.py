@@ -1,20 +1,11 @@
-"""
-src/evaluator.py - Comprehensive Two-Stage Evaluation Framework.
-Implements:
-1. Stage 1 (Retrieval Evaluation): Recall@K, Precision@K, Mean Reciprocal Rank (MRR), Latency (Avg & P95).
-2. Stage 2 (Generation / RAGAS-Style Evaluation): Faithfulness, Answer Relevance, Context Precision, Citation Accuracy.
-3. Tri-Way Comparator: ColPali (Late Interaction) vs Dense Visual (CLIP-style) vs Traditional Text RAG (BM25).
-"""
+"""Metric helpers for the experimental page-retrieval benchmark."""
 
-import time
-import math
 import numpy as np
-import pandas as pd
 from typing import List, Dict, Any
 
 
 class SystemEvaluator:
-    """Evaluates both retrieval fidelity and generation grounding across real multi-domain queries."""
+    """Calculates retrieval metrics from supplied per-query results."""
 
     @staticmethod
     def calculate_retrieval_metrics(results: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -43,48 +34,6 @@ class SystemEvaluator:
             "precision@1": round((r1_hits / n) * 100.0, 1), # Single relevant target page
             "precision@3": round((r3_hits / (n * 3.0)) * 100.0, 1),
             "mrr": round(mrr_total / n, 3),
-            "latency_avg_ms": round(lat_avg, 1),
-            "latency_p95_ms": round(lat_p95, 1)
-        }
-
-    @staticmethod
-    def calculate_generation_ragas(
-        query: str,
-        generated_answer: str,
-        retrieved_text: str,
-        target_page: int,
-        cited_page: int
-    ) -> Dict[str, float]:
-        """
-        RAGAS-Inspired Multimodal Generation Evaluation:
-        - Faithfulness: ratio of statements grounded in visual evidence.
-        - Answer Relevance: semantic alignment between user prompt and generated output.
-        - Context Precision: signal-to-noise ratio in retrieved page tokens.
-        - Citation Accuracy: 1.0 if cited page matches ground truth, 0.0 otherwise.
-        """
-        q_words = set(query.lower().split())
-        ans_words = set(generated_answer.lower().split())
-        ctx_words = set(retrieved_text.lower().split()) if retrieved_text else set()
-
-        # 1. Faithfulness: Grounded tokens in context
-        grounded_tokens = ans_words.intersection(ctx_words) if ctx_words else ans_words
-        faithfulness = min(len(grounded_tokens) / max(len(ans_words), 1) * 1.8, 1.0)
-        faithfulness = round(max(0.85, faithfulness) * 100.0, 1) # Normal range for verified briefings
-
-        # 2. Answer Relevance: Query terms addressed
-        addressed_query = q_words.intersection(ans_words)
-        relevance = min(len(addressed_query) / max(len(q_words), 1) * 1.6, 1.0)
-        relevance = round(max(0.88, relevance) * 100.0, 1)
-
-        # 3. Context Precision: Fraction of retrieved context relevant to query
-        ctx_precision = 98.4 if cited_page == target_page else 35.0
-
-        # 4. Citation Accuracy
-        citation_acc = 100.0 if cited_page == target_page else 0.0
-
-        return {
-            "faithfulness": faithfulness,
-            "answer_relevance": relevance,
-            "context_precision": ctx_precision,
-            "citation_accuracy": citation_acc
+            "latency_avg_ms": round(lat_avg, 3),
+            "latency_p95_ms": round(lat_p95, 3)
         }

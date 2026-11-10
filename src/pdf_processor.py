@@ -14,7 +14,7 @@ class PDFProcessor:
     def convert_pdf_to_images(pdf_path: str | Path, scale: float = 2.0) -> List[Image.Image]:
         """
         Renders each PDF page to a PIL Image using pypdfium2.
-        scale=2.0 renders at ~144 DPI for optimal visual clarity with ColPali & Vision-LLMs.
+        scale controls preview rendering resolution; it is not used to create visual embeddings.
         """
         pdf_path = Path(pdf_path)
         if not pdf_path.exists():

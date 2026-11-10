@@ -2,11 +2,13 @@
 Generate sample PDF using PIL (already installed in .venv)
 """
 import os
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
+project_root = Path(__file__).resolve().parents[1]
 paths = [
-    r"C:\Users\Admin\.gemini\antigravity\scratch\multimodal-rag-colpali\sample_financial_report.pdf",
-    r"C:\Users\Admin\.gemini\antigravity\scratch\multimodal-rag-colpali\data\input_pdfs\sample_financial_report.pdf"
+    project_root / "sample_financial_report.pdf",
+    project_root / "data" / "input_pdfs" / "sample_financial_report.pdf",
 ]
 
 # Page 1: Financial Table

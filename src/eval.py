@@ -1,6 +1,6 @@
-"""
-src/eval.py - Multimodal RAG evaluation using Ragas.
-Benchmarks Faithfulness, Answer Relevance, and Context Recall on visual document tasks.
+"""Standalone Ragas smoke experiment over three hand-written examples.
+
+This script does not evaluate outputs from the running SpectraRAG app.
 """
 
 import pandas as pd
@@ -12,7 +12,7 @@ from ragas import evaluate
 def run_multimodal_evaluation():
     """
     Evaluates visual document retrieval and answer generation faithfulness.
-    Demonstrates zero hallucination on complex tabular and graphical data.
+        Runs Ragas metrics on a tiny illustrative dataset, not app-generated answers.
     """
     sample_dataset = {
         "question": [

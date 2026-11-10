@@ -1,6 +1,6 @@
 """
 Script to generate a sample multi-column financial PDF with a table and chart
-to immediately test ColPali visual retrieval without needing to search for a PDF.
+for trying the PDF preview and text-search prototype.
 """
 import os
 import matplotlib
@@ -9,7 +9,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 
-output_pdf = "data/input_pdfs/sample_financial_report.pdf"
+from pathlib import Path
+
+output_pdf = Path(__file__).resolve().parents[1] / "data" / "input_pdfs" / "sample_financial_report.pdf"
 os.makedirs("data/input_pdfs", exist_ok=True)
 
 with PdfPages(output_pdf) as pdf:

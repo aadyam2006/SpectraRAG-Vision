@@ -3,10 +3,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from pathlib import Path
 
+project_root = Path(__file__).resolve().parents[1]
 paths = [
-    r"C:\Users\Admin\.gemini\antigravity\scratch\multimodal-rag-colpali\sample_financial_report.pdf",
-    r"C:\Users\Admin\.gemini\antigravity\scratch\multimodal-rag-colpali\data\input_pdfs\sample_financial_report.pdf"
+    project_root / "sample_financial_report.pdf",
+    project_root / "data" / "input_pdfs" / "sample_financial_report.pdf",
 ]
 
 for p in paths:

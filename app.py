@@ -1,12 +1,12 @@
 """
-app.py - SpectraRAG Vision: Next-Gen Multimodal Document Intelligence Studio.
+app.py - SpectraRAG Vision: PDF Q&A prototype.
 Comprehensive implementation featuring:
 1. Modern Outstaff Neo-Dashboard UI
 2. Multi-Page Document Preview & Filmstrip Gallery
-3. Visual Retrieval with Bounding Box / Patch Region Highlighting
-4. Verified Source Citations & Click-to-Jump Navigation
+3. Embedded-text page ranking with a PDF page preview
+4. Page references and click-to-jump navigation
 5. Live Retrieval Evaluation (Recall@K, MRR, Precision@K) with Altair charts
-6. Real-time Side-by-Side Comparison (ColPali Visual vs Naive Text RAG)
+6. Side-by-side comparison of prototype ranking heuristics
 7. Multi-Turn Chat Experience with Persistent Conversation History
 8. Robust Error Handling (file validation, empty query protection, graceful fallbacks)
 """
@@ -26,12 +26,10 @@ from PIL import Image, ImageDraw
 import pypdfium2 as pdfium
 
 # Core modules
-from src.retriever import ColPaliRetriever
+from src.retriever import TextOverlapRetriever
 from src.generator import MultimodalGenerator
-from src.pdf_processor import PDFProcessor
-from src.baseline_text_rag import NaiveTextRAG
-from src.dense_visual_rag import DenseVisualRAG
-from src.evaluator import SystemEvaluator
+from src.keyword_baseline import KeywordOverlapBaseline
+from src.layout_heuristic import LayoutHeuristicBaseline
 from benchmark_recall import BENCHMARK_DATASET, run_research_benchmark
 
 # 1. Page Configuration
@@ -274,7 +272,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# 3. Helper Functions: Gauge Rings & Visual Patch Bounding Box
+# 3. Helper Functions: Page Highlighting & Thumbnail Rendering
 def render_circular_ring(pct: int, label: str, sublabel: str, color: str) -> str:
     r = 38
     c = 2 * math.pi * r
@@ -298,11 +296,11 @@ def get_cached_disk_page_image(pdf_path: str, page_num: int) -> Image.Image:
 
 
 def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") -> Image.Image:
-    """Renders page screenshot with a precision visual patch bounding box in <1ms (Instant)."""
+    """Render a page preview and optionally highlight query terms in extracted text."""
     if not pdf_path:
         return Image.new("RGB", (400, 500), (245, 245, 245))
 
-    # 1. Fetch pre-rendered high-res screenshot directly from retriever memory (0ms)
+    # Reuse the page image rendered while extracting PDF text.
     base_img = None
     if "retriever" in st.session_state and hasattr(st.session_state.retriever, "get_page_image"):
         base_img = st.session_state.retriever.get_page_image(page_num)
@@ -313,14 +311,14 @@ def render_page_with_highlight(pdf_path: str, page_num: int, query: str = "") ->
     if not query:
         return base_img
 
-    # 2. Fast bounding box overlay (<0.5ms)
+    # The overlay is an approximate visual guide, not a text-coordinate match.
     pil_img = base_img.copy().convert("RGBA")
     overlay = Image.new("RGBA", pil_img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(overlay)
     iw, ih = pil_img.size
     q_lower = query.lower()
 
-    # Intelligent Section Position Heuristics (0ms calculation)
+    # Choose a rough page region based on query keywords.
     if any(k in q_lower for k in ["skill", "tech", "programming", "language", "stack", "tool", "framework"]):
         y0, y1 = int(ih * 0.25), int(ih * 0.44)
     elif any(k in q_lower for k in ["project", "work", "app", "mentor"]):
@@ -364,14 +362,14 @@ def get_cached_thumbnails(pdf_path_str: str, max_thumbs: int = 6):
 
 # 4. State Initialization (One-time, zero reload overhead)
 if "retriever" not in st.session_state or not hasattr(st.session_state.retriever, "search_all_pages"):
-    from src.retriever import ColPaliRetriever
-    st.session_state.retriever = ColPaliRetriever(model_name="vidore/colpali-v1.2", index_root=".byaldi")
+    from src.retriever import TextOverlapRetriever
+    st.session_state.retriever = TextOverlapRetriever()
 
 if "text_rag" not in st.session_state:
-    st.session_state.text_rag = NaiveTextRAG()
+    st.session_state.text_rag = KeywordOverlapBaseline()
 
 if "dense_rag" not in st.session_state:
-    st.session_state.dense_rag = DenseVisualRAG()
+    st.session_state.dense_rag = LayoutHeuristicBaseline()
 
 if "generator" not in st.session_state:
     from src.generator import MultimodalGenerator
@@ -398,9 +396,9 @@ if "last_query" not in st.session_state:
 if "last_top_page" not in st.session_state:
     st.session_state.last_top_page = 1
 if "last_top_score" not in st.session_state:
-    st.session_state.last_top_score = 28.5
+    st.session_state.last_top_score = 0.0
 if "last_retrieval_ms" not in st.session_state:
-    st.session_state.last_retrieval_ms = 14
+    st.session_state.last_retrieval_ms = 0
 if "inspect_page" not in st.session_state:
     st.session_state.inspect_page = 1
 if "highlight_region" not in st.session_state:
@@ -427,7 +425,7 @@ with st.sidebar:
     gen_mode = st.selectbox(
         "Synthesis Engine",
         [
-            "⚡ Fast Demo Mode (Instant <0.5s - CPU)",
+            "⚡ Fast Demo Templates (no LLM)",
             "💻 Local Ollama (LLaVA on CPU)",
             "☁️ Gemini Vision API (Cloud)"
         ],
@@ -526,10 +524,10 @@ with st.sidebar:
     <div class="ai-assistant-card">
         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div style="font-size: 14px; font-weight: 800; color: #4338CA;">AI Assistant</div>
-            <span class="pill pill-todo">Zero-OCR</span>
+            <span class="pill pill-todo">PDF text search</span>
         </div>
         <p style="font-size: 12px; color: #4B5563; margin: 8px 0 12px 0; line-height: 1.4;">
-            ColPali late-interaction patch matching processes full visual geometry with zero text degradation.
+            Searches text embedded in the PDF and previews the matching page.
         </p>
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <span class="pill pill-cyan">Turbo Engine</span>
@@ -550,18 +548,17 @@ st.markdown(f"""
     <div>
         <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: #0F172A; letter-spacing: -0.5px;">Dashboard</h1>
-            <span class="pill pill-cyan">Zero-OCR Active</span>
-            <span class="pill pill-todo">ColPali v1.2</span>
-            <span class="pill pill-done">15ms MaxSim</span>
+            <span class="pill pill-cyan">Text search active</span>
+            <span class="pill pill-todo">Prototype</span>
         </div>
         <div style="margin-top: 4px; font-size: 13px; font-weight: 500; color: #64748B;">
-            Active Document: <strong style="color: #0F172A;">{active_file_name}</strong> ({num_pages} pages) • Visual Patch Grounding
+            Active Document: <strong style="color: #0F172A;">{active_file_name}</strong> ({num_pages} pages) • PDF text-overlap ranking
         </div>
     </div>
     <div style="background: #EDE9FE; border-radius: 18px; padding: 10px 22px; display: flex; align-items: center; gap: 16px; border: 1px solid rgba(139, 92, 246, 0.2); box-shadow: 0 4px 14px rgba(139, 92, 246, 0.08);">
         <div>
-            <div style="font-size: 11px; font-weight: 700; color: #6D28D9; text-transform: uppercase;">Top Match Score</div>
-            <div style="font-size: 22px; font-weight: 800; color: #4C1D95;">{st.session_state.last_top_score:.1f} <span style="font-size: 13px; font-weight: 600; color: #7C3AED;">pts</span></div>
+            <div style="font-size: 11px; font-weight: 700; color: #6D28D9; text-transform: uppercase;">Text-overlap score</div>
+            <div style="font-size: 22px; font-weight: 800; color: #4C1D95;">{st.session_state.last_top_score:.1f}</div>
         </div>
         <div style="font-size: 22px; background: #FFFFFF; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.06);">
             ⚡
@@ -575,7 +572,7 @@ st.markdown(f"""
 tab_studio, tab_preview, tab_compare, tab_analytics, tab_benchmark = st.tabs([
     "⚡ Studio",
     "📑 Page Gallery",
-    "⚖️ Compare Text RAG",
+    "⚖️ Compare Heuristics",
     "📊 Analytics",
     "🔬 Benchmark"
 ])
@@ -583,7 +580,7 @@ tab_studio, tab_preview, tab_compare, tab_analytics, tab_benchmark = st.tabs([
 
 
 # ==============================================================================
-# TAB 1: STUDIO & GROUNDED CHAT (Visual Retrieval + Citations + Chat History)
+# TAB 1: PDF Q&A (Text Retrieval + Page References + Chat History)
 # ==============================================================================
 with tab_studio:
     if not st.session_state.active_pdf_path:
@@ -592,20 +589,20 @@ with tab_studio:
         # Split Screen Layout
         col_evidence, col_synthesis = st.columns([1.05, 1], gap="large")
 
-        # LEFT: Visual Evidence Studio
+        # LEFT: Retrieved Page Preview
         with col_evidence:
             st.markdown("""
             <div class="card-title">
-                <span>🔍 Visual Evidence Studio</span>
-                <span class="pill pill-cyan">144 DPI Grounding</span>
+                <span>🔍 Retrieved Page Preview</span>
+                <span class="pill pill-cyan">Page preview</span>
             </div>
-            <div class="card-subtitle">Exact document page screenshot localized via late-interaction patch vectors</div>
+            <div class="card-subtitle">Inspect the selected PDF page; retrieval uses embedded text, not image patches</div>
             """, unsafe_allow_html=True)
 
             # Controls: Region Highlight Toggle & Page Selector
             ctrl_col1, ctrl_col2 = st.columns([1.2, 1])
             with ctrl_col1:
-                st.session_state.highlight_region = st.toggle("🎯 Highlight Matched Region", value=st.session_state.highlight_region)
+                st.session_state.highlight_region = st.toggle("Show approximate highlight", value=st.session_state.highlight_region)
             with ctrl_col2:
                 curr_inspect = min(max(int(st.session_state.get("inspect_page", 1)), 1), max(num_pages, 1))
                 selected_page = st.number_input("Inspect Page", min_value=1, max_value=max(num_pages, 1), value=curr_inspect, step=1)
@@ -629,22 +626,23 @@ with tab_studio:
             <div style="background: #FFFFFF; border: 1px solid #E8ECF4; border-radius: 14px; padding: 10px 16px; margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span class="pill pill-todo">Page {st.session_state.inspect_page}</span>
-                    <span style="font-size: 13px; font-weight: 700; color: #0F172A;">Visual Evidence</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #0F172A;">Selected PDF page</span>
                 </div>
-                <span class="pill pill-cyan">Score: {st.session_state.last_top_score:.1f} pts</span>
+                <span class="pill pill-cyan">Text score: {st.session_state.last_top_score:.1f}</span>
             </div>
             """, unsafe_allow_html=True)
 
-            st.image(annotated_img, caption=f"Document Screenshot • Page {st.session_state.inspect_page}", use_container_width=True)
+            st.caption("The highlight is approximate and does not identify exact text coordinates.")
+            st.image(annotated_img, caption=f"Document page preview • Page {st.session_state.inspect_page}", use_container_width=True)
 
-        # RIGHT: Grounded Intelligence Chat with Conversation History
+        # RIGHT: Document Q&A with Conversation History
         with col_synthesis:
             st.markdown("""
             <div class="card-title">
-                <span>💡 Grounded Intelligence Chat</span>
+                <span>💡 Document Q&amp;A</span>
                 <span class="pill pill-todo">Executive Synthesis</span>
             </div>
-            <div class="card-subtitle">Multi-turn grounded conversation with instant source citations</div>
+            <div class="card-subtitle">Ask questions and see which page the text search retrieved</div>
             """, unsafe_allow_html=True)
 
             # Quick Prompt Chips based on document type
@@ -698,7 +696,7 @@ with tab_studio:
                     else:
                         with st.chat_message("assistant", avatar="🔮"):
                             st.markdown(msg["content"])
-                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Sourced from Page {msg.get("target_page", 1)}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">{msg.get("score", 28.5):.1f} pts | {msg.get("latency_ms", 15)}ms</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Retrieved Page {msg.get("target_page", 1)}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">Search {msg.get("latency_ms", 0)}ms</span></div>', unsafe_allow_html=True)
 
             # Chat Input Box
             query = st.chat_input("Ask about charts, tables, diagrams, or numbers in this document...")
@@ -721,11 +719,11 @@ with tab_studio:
                         "time": now_str
                     })
 
-                    # Execute ColPali Search
-                    start_search = time.time()
+                    # Rank pages using extracted text overlap
+                    start_search = time.perf_counter()
                     try:
                         results = st.session_state.retriever.search(query_clean, top_k=top_k)
-                        retrieval_ms = int((time.time() - start_search) * 1000)
+                        retrieval_ms = round((time.perf_counter() - start_search) * 1000, 3)
                     except Exception as e:
                         st.error(f"Search retrieval error: {str(e)}")
                         results = []
@@ -756,7 +754,7 @@ with tab_studio:
                             answer_placeholder.markdown(full_answer)
                             
                             # Instant citation pill below streamed answer
-                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Sourced from Page {top_page}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">{top_score:.1f} pts | {retrieval_ms}ms</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="citation-card"><div style="display: flex; align-items: center; gap: 8px;"><span class="pill pill-done">📌 Retrieved Page {top_page}</span><span style="font-size: 12px; font-weight: 600; color: #64748B;">{active_file_name}</span></div><span class="pill pill-cyan">Score {top_score:.1f} | Search {retrieval_ms}ms</span></div>', unsafe_allow_html=True)
 
                         # Store in history
                         st.session_state.messages.append({
@@ -779,19 +777,19 @@ with tab_preview:
     <div class="outstaff-card">
         <div class="card-title">
             <span>📑 Multi-Page Document Preview Gallery</span>
-            <span class="pill pill-cyan">Full Document Filmstrip</span>
+            <span class="pill pill-cyan">Page gallery</span>
         </div>
-        <div class="card-subtitle">Interactive visual page inspector showing layout complexity, token densities, and thumbnails</div>
+        <div class="card-subtitle">Preview pages and inspect extracted-text snippets</div>
     """, unsafe_allow_html=True)
 
     if not st.session_state.active_pdf_path:
         st.info("👈 Upload or select a PDF to preview pages.")
     else:
         try:
-            # Instant in-memory thumbnails from indexed pages (0ms disk I/O)
+            # Reuse the page images rendered during indexing when available.
             thumbs = []
-            if hasattr(st.session_state.retriever, "turbo_engine") and st.session_state.retriever.turbo_engine.pages_data:
-                for p in st.session_state.retriever.turbo_engine.pages_data[:min(num_pages, 6)]:
+            if hasattr(st.session_state.retriever, "page_index") and st.session_state.retriever.page_index.pages_data:
+                for p in st.session_state.retriever.page_index.pages_data[:min(num_pages, 6)]:
                     img = p["image"]
                     w, h = img.size
                     target_w = 200
@@ -826,440 +824,195 @@ with tab_preview:
 
 
 
-# ==============================================================================
-# TAB 3: TRI-WAY COMPARISON (ColPali vs Dense Visual CLIP vs Traditional Text RAG)
-# ==============================================================================
+# ============================================================================
+# TAB 3: EXPERIMENTAL HEURISTIC COMPARISON
+# ============================================================================
 with tab_compare:
-    st.markdown("""
-    <div class="outstaff-card">
-        <div class="card-title">
-            <span>⚖️ Tri-Way Retrieval Comparator: ColPali vs Dense Visual (CLIP) vs Traditional Text RAG</span>
-            <span class="pill pill-todo">3-Way Architecture</span>
-        </div>
-        <div class="card-subtitle">Empirical evidence showing why single-vector visual pooling and 1D text chunking fail on complex layout geometry</div>
-    """, unsafe_allow_html=True)
+    st.markdown("## Compare page-ranking heuristics")
+    st.caption(
+        "These are small hand-built baselines for exploration, not ColPali, CLIP, "
+        "or BM25. They may rank pages differently and are not evidence of model quality."
+    )
 
-    col_cp, col_clip, col_tr = st.columns(3, gap="medium")
+    if not st.session_state.active_pdf_path:
+        st.info("Upload or select a PDF to compare the page-ranking heuristics.")
+    else:
+        col_text, col_layout, col_keyword = st.columns(3, gap="medium")
+        text_results = st.session_state.retriever.search(st.session_state.last_query, top_k=1)
+        layout_results = st.session_state.dense_rag.search(st.session_state.last_query, top_k=1)
+        keyword_results = st.session_state.text_rag.search(st.session_state.last_query, top_k=1)
 
-    # 1. ColPali Visual Late-Interaction
-    with col_cp:
-        st.markdown(f"""
-        <div style="background: #EEF2FF; border: 1px solid #C7D2FE; border-radius: 16px; padding: 14px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="pill pill-todo">🔮 ColPali Visual</span>
-                <span class="pill pill-done">MaxSim 1.2ms</span>
-            </div>
-            <div style="font-size: 13px; font-weight: 700; color: #4338CA; margin-top: 8px;">
-                Top Retrieved: <strong>Page {st.session_state.last_top_page}</strong> ({st.session_state.last_top_score:.1f} pts)
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        comparisons = [
+            (col_text, "PDF text overlap", text_results, "Extracted embedded PDF text ranked by token overlap and synonyms."),
+            (col_layout, "Page-layout heuristic", layout_results, "A hand-built grayscale thumbnail statistic; not a learned vision model."),
+            (col_keyword, "Keyword baseline", keyword_results, "Simple term-frequency overlap over extracted page text; not BM25."),
+        ]
+        for column, label, results, description in comparisons:
+            with column:
+                page_num = results[0].page_num if label == "PDF text overlap" and results else (
+                    results[0]["page_num"] if results else 1
+                )
+                score = results[0].score if label == "PDF text overlap" and results else (
+                    results[0]["score"] if results else 0.0
+                )
+                st.markdown(f"### {label}")
+                st.caption(description)
+                st.metric("Top page", f"Page {page_num}", f"Heuristic score {score:.2f}")
+                page_preview = render_page_with_highlight(
+                    st.session_state.active_pdf_path, page_num, st.session_state.last_query
+                )
+                st.image(page_preview, use_container_width=True)
 
-        if st.session_state.inspect_page == st.session_state.last_top_page and 'annotated_img' in locals():
-            cp_preview = annotated_img
-        else:
-            cp_preview = render_page_with_highlight(
-                st.session_state.active_pdf_path,
-                st.session_state.last_top_page,
-                st.session_state.last_query
-            )
-        st.image(cp_preview, caption="ColPali: 1,024 Spatial Patch Vectors", use_container_width=True)
-        st.markdown("""
-        **Core Strengths:**
-        - ✅ **Zero OCR Degradation:** Directly indexes visual pixels.
-        - ✅ **Multi-Vector Precision:** 1,024 patch tokens per page.
-        - ✅ **2D Spatial Grounding:** Preserves charts & tables.
-        """)
-
-    # 2. Dense Visual RAG (CLIP-Style)
-    with col_clip:
-        dense_matches = st.session_state.dense_rag.search(st.session_state.last_query, top_k=1)
-        dense_page = dense_matches[0]["page_num"] if dense_matches else 1
-        dense_score = dense_matches[0]["score"] if dense_matches else 0.0
-
-        st.markdown(f"""
-        <div style="background: #E0F2FE; border: 1px solid #BAE6FD; border-radius: 16px; padding: 14px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="pill pill-cyan">🖼️ Dense Visual (CLIP)</span>
-                <span class="pill pill-todo">Single Vector</span>
-            </div>
-            <div style="font-size: 13px; font-weight: 700; color: #0369A1; margin-top: 8px;">
-                Top Retrieved: <strong>Page {dense_page}</strong> (Cosine: {dense_score:.1f})
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        dense_preview = render_page_with_highlight(st.session_state.active_pdf_path, dense_page, "")
-        st.image(dense_preview, caption="Dense Visual: Pooled 512-dim Global Embedding", use_container_width=True)
-        st.markdown("""
-        **Dense Visual Bottleneck:**
-        - ⚠️ **Global Pooling Loss:** Entire page is averaged into 1 vector.
-        - ⚠️ **Table Cell Blindness:** Fine numbers get washed out.
-        - ✅ **High-Level Visuals:** Good for coarse chart detection.
-        """)
-
-    # 3. Baseline Text RAG (BM25)
-    with col_tr:
-        text_matches = st.session_state.text_rag.search(st.session_state.last_query, top_k=1)
-        text_page = text_matches[0]["page_num"] if text_matches else 1
-        text_score = text_matches[0]["score"] if text_matches else 0.0
-        text_snippet = text_matches[0]["text_snippet"] if text_matches else "No raw text indexed."
-
-        st.markdown(f"""
-        <div style="background: #FEF2F2; border: 1px solid #FECACA; border-radius: 16px; padding: 14px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="pill pill-red">📄 Traditional Text RAG</span>
-                <span class="pill pill-gray">BM25 / 1D Text</span>
-            </div>
-            <div style="font-size: 13px; font-weight: 700; color: #B91C1C; margin-top: 8px;">
-                Top Retrieved: <strong>Page {text_page}</strong> (BM25 Score: {text_score:.1f})
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("**Extracted 1D Flat Stream:**")
-        st.text_area("Raw Text Chunk", value=text_snippet, height=180, disabled=True)
-        st.markdown("""
-        **Failure Modes in Traditional RAG:**
-        - ❌ **Chart Blindness:** 0 textual characters in charts.
-        - ❌ **Table Mangle:** Dual columns collapsed into broken lines.
-        - ❌ **OCR Errors:** Misspells numbers and technical terms.
-        """)
-
-    st.divider()
-    st.markdown("### 📊 Architectural Capabilities & Performance Matrix")
-    
-    comp_matrix_df = pd.DataFrame([
-        {"Architecture": "ColPali Visual (Proposed)", "Text Retrieval": "✅ Full", "Visual Chart Retrieval": "✅ Full (100%)", "2D Spatial Layout": "✅ Preserved (1,024 Patches)", "Recall @ 1": "54.3%", "Recall @ 3": "97.1%", "Mean Latency": "1.2 ms"},
-        {"Architecture": "Dense Visual (CLIP-style)", "Text Retrieval": "⚠️ Limited", "Visual Chart Retrieval": "✅ High (66.7%)", "2D Spatial Layout": "⚠️ Averaged (Single 512-dim)", "Recall @ 1": "54.3%", "Recall @ 3": "88.6%", "Mean Latency": "0.0 ms"},
-        {"Architecture": "Traditional Text RAG", "Text Retrieval": "✅ Full", "Visual Chart Retrieval": "❌ Blind (0.0%)", "2D Spatial Layout": "❌ Flattened to 1D String", "Recall @ 1": "31.4%", "Recall @ 3": "97.1%", "Mean Latency": "0.3 ms"}
-    ])
-    st.dataframe(comp_matrix_df, use_container_width=True, hide_index=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ==============================================================================
-# TAB 4: VISUAL ANALYTICS & TELEMETRY
-# ==============================================================================
+        st.info(
+            "For a meaningful ColPali/CLIP/BM25 comparison, those real model and retrieval "
+            "implementations plus a shared, reproducible benchmark corpus still need to be added."
+        )
+# ============================================================================
+# TAB 4: PDF TEXT SEARCH ANALYTICS
+# ============================================================================
 with tab_analytics:
-    # Row 1: Capsule Bars & Spline Area Chart
-    col_chart_left, col_chart_right = st.columns([1.1, 1], gap="medium")
+    st.markdown("## PDF text-search analytics")
+    st.caption("These charts describe extracted text and keyword-overlap scores; they are not visual embedding activations.")
 
     if "cached_scores_query" not in st.session_state or st.session_state.get("cached_scores_query") != st.session_state.last_query:
-        st.session_state.cached_all_scores = st.session_state.retriever.search_all_pages(st.session_state.last_query) if hasattr(st.session_state.retriever, "search_all_pages") else []
+        st.session_state.cached_all_scores = st.session_state.retriever.search_all_pages(st.session_state.last_query)
         st.session_state.cached_scores_query = st.session_state.last_query
 
     all_scores = st.session_state.get("cached_all_scores", [])
-    if not all_scores:
-        all_scores = [
-            {"page_num": i + 1, "score": 20.0 + (i * 2.5), "tokens": 40 + i * 15, "snippet": f"Document Page {i+1}"}
-            for i in range(num_pages)
-        ]
-
-    with col_chart_left:
-        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Time & Page Relevance Distribution</span><span class="pill pill-cyan">ColPali MaxSim</span></div><div class="card-subtitle">Visual patch late-interaction density across document pages</div>', unsafe_allow_html=True)
-
-        bar_df = pd.DataFrame([
-            {
-                "Page": f"P{item['page_num']}",
-                "MaxSim Score": item["score"],
-                "Type": "Top Match" if item["page_num"] == st.session_state.last_top_page else "Indexed Page"
-            }
-            for item in all_scores[:7]
-        ])
-
-        capsule_chart = alt.Chart(bar_df).mark_bar(
-            cornerRadiusTopLeft=12,
-            cornerRadiusTopRight=12,
-            cornerRadiusBottomLeft=12,
-            cornerRadiusBottomRight=12,
-            width=28
-        ).encode(
-            x=alt.X("Page:N", title=None, axis=alt.Axis(labelColor="#64748B", labelFontSize=12, grid=False)),
-            y=alt.Y("MaxSim Score:Q", title="MaxSim Points", axis=alt.Axis(labelColor="#64748B", grid=True, gridColor="#F1F5F9")),
-            color=alt.Color("Type:N", scale=alt.Scale(domain=["Top Match", "Indexed Page"], range=["#0284C7", "#7DD3FC"]), legend=None),
-            tooltip=["Page", "MaxSim Score", "Type"]
-        ).properties(height=140)
-
-        st.altair_chart(capsule_chart.configure_view(strokeWidth=0), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_chart_right:
-        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Task Patch Activation Energy</span><span class="pill pill-todo">Spline Wave</span></div><div class="card-subtitle">Query token late-interaction activations across 1,024 patches</div>', unsafe_allow_html=True)
-
-        token_words = [w for w in st.session_state.last_query.split() if len(w) > 2][:7]
-        if not token_words:
-            token_words = ["query", "document", "visual", "table", "chart", "metrics", "grounding"]
-        
-        spline_df = pd.DataFrame({
-            "token": token_words,
-            "activation": [12.4 + (i * 3.8) % 18.0 for i in range(len(token_words))]
-        })
-        if len(spline_df) > 3:
-            spline_df.loc[len(spline_df) // 2, "activation"] = 31.5
-
-        spline_chart = alt.Chart(spline_df).mark_area(
-            interpolate="monotone",
-            line={"color": "#0284C7", "width": 3},
-            color=alt.Gradient(
-                gradient="linear",
-                stops=[
-                    alt.GradientStop(color="rgba(14, 165, 233, 0.40)", offset=0),
-                    alt.GradientStop(color="rgba(14, 165, 233, 0.02)", offset=1)
-                ],
-                x1=1, x2=1, y1=1, y2=0
-            )
-        ).encode(
-            x=alt.X("token:N", sort=None, axis=alt.Axis(labelColor="#64748B", title=None, grid=False, labelAngle=0)),
-            y=alt.Y("activation:Q", axis=alt.Axis(labelColor="#64748B", title=None, grid=True, gridColor="#F1F5F9"))
-        ).properties(height=130)
-
-        points = alt.Chart(spline_df).mark_circle(size=60, color="#0284C7", fill="#FFFFFF", strokeWidth=3).encode(
-            x=alt.X("token:N", sort=None),
-            y="activation:Q",
-            tooltip=["token", "activation"]
-        )
-        st.altair_chart((spline_chart + points).configure_view(strokeWidth=0), use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Row 2: Inspector Table & Progress Gauges
-    col_table_left, col_widgets_right = st.columns([1.1, 1], gap="medium")
-
-    with col_table_left:
-        st.markdown('<div class="outstaff-card"><div class="card-title"><span>Last Tasks & Document Sections</span><div style="display: flex; gap: 6px;"><span class="pill pill-done">Active</span><span class="pill pill-cyan">Zero-OCR</span></div></div><div class="card-subtitle">Multi-page layout inspection and patch token counts</div>', unsafe_allow_html=True)
-
-        table_df = pd.DataFrame([
-            {
-                "Page": f"Page {item['page_num']}",
-                "Detected Section / Content": item.get("snippet", "Table / Content")[:40],
-                "Tokens": item.get("tokens", 50),
-                "Status": "🎯 Top Match" if item["page_num"] == st.session_state.last_top_page else "✅ Indexed",
-                "MaxSim Score": f"{item['score']:.1f} pts"
-            }
-            for item in all_scores[:6]
-        ])
-        st.dataframe(table_df, use_container_width=True, hide_index=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_widgets_right:
-        ring1 = render_circular_ring(94, "94%", "Semantic Alignment", "#8B5CF6")
-        ring2 = render_circular_ring(85, f"{st.session_state.last_retrieval_ms}ms", "Retrieval Speed", "#3B82F6")
-        ring3 = render_circular_ring(100, "100%", "Zero-OCR Fidelity", "#06B6D4")
-
-        st.markdown(f'<div class="outstaff-card"><div class="card-title"><span>Progress</span><span class="pill pill-done">Healthy</span></div><div class="card-subtitle">Retrieval telemetry and visual embedding fidelity</div><div style="display: flex; justify-content: space-around; align-items: center; padding: 10px 0;">{ring1}{ring2}{ring3}</div></div>', unsafe_allow_html=True)
-
-        col_dark, col_achieve = st.columns(2, gap="small")
-        with col_dark:
-            st.markdown(f'<div class="dark-metric-card"><div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Per Page Patches</div><div style="font-size: 26px; font-weight: 800; color: #FFFFFF; margin: 4px 0;">1,024+</div><div style="display: flex; gap: 3px; align-items: flex-end; height: 18px; margin-bottom: 12px;"><div style="width: 4px; height: 10px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 16px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 18px; background: #38BDF8; border-radius: 2px;"></div><div style="width: 4px; height: 14px; background: #38BDF8; border-radius: 2px;"></div></div><div style="font-size: 11px; font-weight: 600; color: #94A3B8; text-transform: uppercase;">Search Latency</div><div style="font-size: 22px; font-weight: 800; color: #34D399; margin: 2px 0;">{st.session_state.last_retrieval_ms} ms</div></div>', unsafe_allow_html=True)
-
-        with col_achieve:
-            st.markdown('<div class="outstaff-card" style="padding: 16px; height: 100%;"><div style="font-size: 13px; font-weight: 800; color: #0F172A; margin-bottom: 10px;">Key Features</div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;"><div style="background: #E0F2FE; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">📄</span><div style="font-size: 10px; font-weight: 700; color: #0369A1;">Zero-OCR</div></div><div style="background: #EDE9FE; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">⚡</span><div style="font-size: 10px; font-weight: 700; color: #6D28D9;">15ms CPU</div></div><div style="background: #D1FAE5; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">🎯</span><div style="font-size: 10px; font-weight: 700; color: #047857;">MaxSim</div></div><div style="background: #FEF3C7; border-radius: 12px; padding: 10px; text-align: center;"><span style="font-size: 18px;">💬</span><div style="font-size: 10px; font-weight: 700; color: #B45309;">Grounded</div></div></div></div>', unsafe_allow_html=True)
-
-
-
-# ==============================================================================
-# TAB 5: RESEARCH-GRADE EVALUATION & REAL FAILURE ANALYSIS
-# ==============================================================================
-with tab_benchmark:
-    st.markdown("""
-    <div class="outstaff-card">
-        <div class="card-title">
-            <span>🔬 Quantitative Evaluation Suite: Tri-Way Retrieval & RAGAS Generation</span>
-            <span class="pill pill-done">35 Queries • 10 Categories</span>
-        </div>
-        <div class="card-subtitle">Two-stage empirical evaluation: Stage 1 Tri-Way Retrieval (ColPali vs Dense CLIP vs Text RAG) + Stage 2 Generation Grounding (RAGAS)</div>
-    """, unsafe_allow_html=True)
-
-    # Trigger Benchmark Run
-    col_bench_btn, col_bench_info = st.columns([1.2, 2])
-    with col_bench_btn:
-        run_bench = st.button("▶️ Execute 35-Query Tri-Way Benchmark", type="primary", use_container_width=True)
-    with col_bench_info:
-        st.markdown("<div style='font-size: 12px; color: #64748B; padding-top: 8px;'>Evaluates across SEC 10-Q reports, CBSE exam question banks, resumes, and commercial invoices.</div>", unsafe_allow_html=True)
-
-    if run_bench:
-        with st.spinner("Executing 35-query tri-way evaluation (ColPali vs Dense CLIP vs Text RAG)..."):
-            results = run_research_benchmark(BENCHMARK_DATASET)
-            st.session_state.research_benchmark = results
-            st.toast("35-query research evaluation completed successfully!")
-
-    # Load or default benchmark metrics
-    if "research_benchmark" not in st.session_state:
-        st.session_state.research_benchmark = {
-            "colpali_metrics": {"recall@1": 54.3, "recall@3": 97.1, "recall@5": 100.0, "mrr": 0.710, "precision@1": 54.3, "latency_avg_ms": 1.2, "latency_p95_ms": 2.2},
-            "dense_metrics": {"recall@1": 54.3, "recall@3": 88.6, "recall@5": 100.0, "mrr": 0.707, "precision@1": 54.3, "latency_avg_ms": 0.0, "latency_p95_ms": 0.0},
-            "text_metrics": {"recall@1": 31.4, "recall@3": 97.1, "recall@5": 100.0, "mrr": 0.574, "precision@1": 31.4, "latency_avg_ms": 0.3, "latency_p95_ms": 1.0},
-            "ragas_metrics": {"faithfulness": 96.8, "answer_relevance": 95.4, "context_precision": 98.2, "citation_accuracy": 100.0},
-            "detailed_rows": [
-                {
-                    "Query ID": f"Q{item['id']:02d}",
-                    "Category": item["category"],
-                    "Target Page": f"P{item['ground_truth_page']}",
-                    "ColPali Top": f"P{item['ground_truth_page']}" if item["id"] % 2 == 1 or item["id"] in [8, 10, 20, 24, 30] else "P1",
-                    "Dense CLIP Top": "P1" if item["id"] not in [8, 10, 11] else f"P{item['ground_truth_page']}",
-                    "Text RAG Top": "P1" if item["category"] in ["Bar & Line Chart", "Graphical Diagram"] else f"P{item['ground_truth_page']}",
-                    "ColPali Hit": "✅ Pass" if (item["id"] % 2 == 1 or item["id"] in [8, 10, 20, 24, 30]) else "❌ Miss",
-                    "CLIP Hit": "✅ Pass" if item["id"] in [1, 2, 8, 10, 11, 14, 18, 20, 24] else "❌ Miss",
-                    "Text Hit": "❌ Miss" if item["category"] in ["Bar & Line Chart", "Graphical Diagram"] else "✅ Pass"
-                }
-                for item in BENCHMARK_DATASET
-            ]
-        }
-
-    b_data = st.session_state.research_benchmark
-    cp_m = b_data["colpali_metrics"]
-    de_m = b_data["dense_metrics"]
-    tr_m = b_data["text_metrics"]
-    ragas_m = b_data["ragas_metrics"]
-
-    # =========================================================================
-    # STAGE 1: TRI-WAY RETRIEVAL EVALUATION
-    # =========================================================================
-    st.markdown("### 🏆 Stage 1: Tri-Way Retrieval Evaluation")
-    st.markdown("<div style='font-size: 13px; color: #64748B; margin-bottom: 12px;'>Head-to-head metrics comparing Multi-Vector ColPali vs Single-Vector Dense CLIP vs Flat Text BM25</div>", unsafe_allow_html=True)
-
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        st.metric("Recall @ 1", f"{cp_m['recall@1']}%", f"+{cp_m['recall@1'] - tr_m['recall@1']:.1f}% vs Text RAG")
-    with s2:
-        st.metric("Recall @ 3", f"{cp_m['recall@3']}%", f"+{cp_m['recall@3'] - de_m['recall@3']:.1f}% vs Dense CLIP")
-    with s3:
-        st.metric("Mean Recip. Rank (MRR)", f"{cp_m['mrr']:.3f}", f"+{cp_m['mrr'] - tr_m['mrr']:.3f} vs Text RAG")
-    with s4:
-        st.metric("P95 Search Latency", f"{cp_m['latency_p95_ms']} ms", "On-Device CPU")
-
-    # 3-Way Comparative Altair Chart
-    chart_rows = []
-    for metric_name, cp_v, de_v, tr_v in [
-        ("Recall@1", cp_m["recall@1"], de_m["recall@1"], tr_m["recall@1"]),
-        ("Recall@3", cp_m["recall@3"], de_m["recall@3"], tr_m["recall@3"]),
-        ("Recall@5", cp_m["recall@5"], de_m["recall@5"], tr_m["recall@5"]),
-        ("MRR (x100)", cp_m["mrr"] * 100, de_m["mrr"] * 100, tr_m["mrr"] * 100),
-        ("Chart Recall", 100.0, 66.7, 0.0),
-        ("Table Fidelity", 100.0, 45.0, 33.3)
-    ]:
-        chart_rows.append({"Metric": metric_name, "System": "ColPali Visual (Proposed)", "Score (%)": cp_v})
-        chart_rows.append({"Metric": metric_name, "System": "Dense Visual (CLIP-style)", "Score (%)": de_v})
-        chart_rows.append({"Metric": metric_name, "System": "Traditional Text RAG", "Score (%)": tr_v})
-
-    triway_chart = alt.Chart(pd.DataFrame(chart_rows)).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
-        x=alt.X("Metric:N", title=None),
-        y=alt.Y("Score (%):Q", title="Evaluation Score (%)", scale=alt.Scale(domain=[0, 110])),
-        color=alt.Color("System:N", scale=alt.Scale(
-            domain=["ColPali Visual (Proposed)", "Dense Visual (CLIP-style)", "Traditional Text RAG"],
-            range=["#8B5CF6", "#38BDF8", "#94A3B8"]
-        )),
-        xOffset="System:N",
-        tooltip=["System", "Metric", "Score (%)"]
-    ).properties(height=260)
-
-    st.altair_chart(triway_chart, use_container_width=True)
-
-    st.divider()
-
-    # =========================================================================
-    # STAGE 2: GENERATION GROUNDING & RAGAS METRICS
-    # =========================================================================
-    st.markdown("### 🎯 Stage 2: Multimodal Generation Evaluation (RAGAS Grounding)")
-    st.markdown("<div style='font-size: 13px; color: #64748B; margin-bottom: 12px;'>Quantitative verification of VLM answer correctness, visual evidence faithfulness, and citation integrity</div>", unsafe_allow_html=True)
-
-    r1, r2, r3, r4 = st.columns(4)
-    with r1:
-        st.metric("Faithfulness", f"{ragas_m['faithfulness']}%", "Zero Hallucination")
-    with r2:
-        st.metric("Answer Relevance", f"{ragas_m['answer_relevance']}%", "Direct Alignment")
-    with r3:
-        st.metric("Context Precision", f"{ragas_m['context_precision']}%", "Visual Patch Signal")
-    with r4:
-        st.metric("Citation Accuracy", f"{ragas_m['citation_accuracy']}%", "100% Page Match")
-
-    st.markdown("""
-    <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 14px; padding: 12px 18px; margin: 10px 0 20px 0; font-size: 12px; color: #475569;">
-        <strong>How Generation is Evaluated:</strong> Every answer produced by the synthesis engine is cross-checked against the localized visual patch vectors on the target page. 
-        <strong>Faithfulness (96.8%)</strong> confirms that extracted facts originate exclusively from the screenshot. 
-        <strong>Answer Relevance (95.4%)</strong> verifies that the VLM answers the exact question without drifting into peripheral commentary.
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.divider()
-
-    # =========================================================================
-    # 35-QUERY INTERACTIVE BENCHMARK EXPLORER
-    # =========================================================================
-    st.markdown("### 📋 35-Query Evaluation Explorer by Document Category")
-    
-    categories = ["All Categories (35 Queries)"] + sorted(list(set(item["category"] for item in BENCHMARK_DATASET)))
-    sel_cat = st.selectbox("Filter Queries by Layout / Category:", categories)
-
-    all_rows = b_data.get("detailed_rows", [])
-    if sel_cat != "All Categories (35 Queries)":
-        filtered_rows = [r for r in all_rows if r["Category"] == sel_cat]
+    page_data = st.session_state.retriever.page_index.pages_data
+    if not page_data:
+        st.info("Upload or select a PDF to see its extracted-text profile.")
     else:
-        filtered_rows = all_rows
+        total_tokens = sum(len(page["tokens"]) for page in page_data)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Pages indexed", len(page_data))
+        m2.metric("Unique tokens", total_tokens)
+        m3.metric("Last search call", f"{st.session_state.last_retrieval_ms} ms")
 
-    st.dataframe(pd.DataFrame(filtered_rows), use_container_width=True, hide_index=True)
+        left, right = st.columns(2, gap="medium")
+        with left:
+            st.markdown("### Page ranking scores")
+            if all_scores:
+                score_df = pd.DataFrame([
+                    {"Page": f"P{item['page_num']}", "Keyword-overlap score": item["score"]}
+                    for item in all_scores
+                ])
+                score_chart = alt.Chart(score_df).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+                    x=alt.X("Page:N", sort=None, title=None),
+                    y=alt.Y("Keyword-overlap score:Q", title="Heuristic score"),
+                    color=alt.condition(
+                        alt.datum.Page == f"P{st.session_state.last_top_page}",
+                        alt.value("#0284C7"), alt.value("#7DD3FC")
+                    ),
+                    tooltip=["Page", "Keyword-overlap score"]
+                ).properties(height=220)
+                st.altair_chart(score_chart, use_container_width=True)
+            else:
+                st.info("Ask a question in the Studio tab to calculate page ranking scores.")
 
-    st.divider()
+        with right:
+            st.markdown("### Query-term occurrences")
+            terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_]+", st.session_state.last_query.lower())))
+            term_rows = []
+            for term in terms:
+                occurrences = sum(page["text"].lower().count(term) for page in page_data)
+                term_rows.append({"Query term": term, "Occurrences in PDF text": occurrences})
+            if term_rows:
+                term_chart = alt.Chart(pd.DataFrame(term_rows)).mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6).encode(
+                    x=alt.X("Query term:N", sort=None, title=None),
+                    y=alt.Y("Occurrences in PDF text:Q", title="Text occurrences"),
+                    color=alt.value("#38BDF8"),
+                    tooltip=["Query term", "Occurrences in PDF text"]
+                ).properties(height=220)
+                st.altair_chart(term_chart, use_container_width=True)
+            else:
+                st.info("Enter a question in the Studio tab to inspect its terms.")
 
-    # =========================================================================
-    # RIGOROUS HARDWARE PROFILE & LATENCY SPECIFICATIONS
-    # =========================================================================
-    st.markdown("### ⚙️ Hardware Specifications & Latency Profile (No Overclaims)")
-    st.markdown("<div style='font-size: 13px; color: #64748B; margin-bottom: 12px;'>Reproducible benchmarks measured on local on-device hardware across 35 multi-document queries</div>", unsafe_allow_html=True)
+        if all_scores:
+            st.markdown("### Indexed page details")
+            st.dataframe(pd.DataFrame([
+                {
+                    "Page": item["page_num"],
+                    "Extracted text preview": item["snippet"],
+                    "Unique tokens": item["tokens"],
+                    "Keyword-overlap score": item["score"],
+                }
+                for item in all_scores
+            ]), use_container_width=True, hide_index=True)
+# ============================================================================
+# TAB 5: EXPERIMENTAL RETRIEVAL EVALUATION
+# ============================================================================
+with tab_benchmark:
+    st.markdown("## Experimental retrieval evaluation")
+    st.caption(
+        "This prototype compares hand-built page-ranking heuristics. It does not run "
+        "ColPali, CLIP, BM25, or an answer-quality judge. Results are generated only "
+        "after running the benchmark against the required local PDFs."
+    )
 
-    spec_df = pd.DataFrame([
-        {"Component": "Retrieval Engine", "Specification": "ColPali Late-Interaction Turbo Index (MaxSim)", "Latency / Metric": "1.2 ms Avg / 2.2 ms P95"},
-        {"Component": "Dense Visual Baseline", "Specification": "CLIP-Style Global Visual Pooling (512-dim)", "Latency / Metric": "<0.1 ms Avg / <0.1 ms P95"},
-        {"Component": "Text Search Baseline", "Specification": "pypdfium2 text stream + BM25 term overlap", "Latency / Metric": "0.3 ms Avg / 1.0 ms P95"},
-        {"Component": "Page Indexing Speed", "Specification": "Zero-OCR 144 DPI Visual Ingestion", "Latency / Metric": "0.17 seconds per page"},
-        {"Component": "VLM Answer Generation", "Specification": "Fast Demo Mode / On-device VLM streaming", "Latency / Metric": "180 ms complete stream"},
-        {"Component": "Workstation Hardware", "Specification": "Intel x86_64 CPU (16 GB RAM)", "Latency / Metric": "Zero GPU / VRAM Required"},
-        {"Component": "Corpus Composition", "Specification": "Real SEC 10-Q Reports, CBSE Question Banks, Invoices, CVs", "Latency / Metric": "35 queries, 5 documents"}
-    ])
-    st.dataframe(spec_df, use_container_width=True, hide_index=True)
+    required_docs = sorted({item["doc"] for item in BENCHMARK_DATASET})
+    missing_docs = []
+    for doc_name in required_docs:
+        candidates = [Path(doc_name), Path("data/input_pdfs") / doc_name]
+        if not any(candidate.is_file() for candidate in candidates):
+            missing_docs.append(doc_name)
 
-    st.divider()
+    if missing_docs:
+        st.warning(
+            "The benchmark is not ready because these source PDFs are missing. "
+            "Add each file to the repository root or `data/input_pdfs/`: "
+            + ", ".join(missing_docs)
+        )
+    else:
+        st.info(
+            f"The benchmark contains {len(BENCHMARK_DATASET)} manually labeled queries "
+            f"across {len(required_docs)} PDFs. Treat results as exploratory: the corpus "
+            "is small and the ranking systems are simple heuristics."
+        )
 
-    # =========================================================================
-    # REAL FAILURE ANALYSIS & MITIGATION ARCHITECTURE
-    # =========================================================================
-    st.markdown("### 🔍 Real-World Failure Analysis & Engineering Mitigations")
-    st.markdown("<div style='font-size: 13px; color: #64748B; margin-bottom: 14px;'>Demonstrating ML engineering maturity by analyzing real failure boundaries and architectural mitigations</div>", unsafe_allow_html=True)
+    run_bench = st.button(
+        "Run heuristic retrieval benchmark",
+        type="primary",
+        disabled=bool(missing_docs),
+        use_container_width=False,
+    )
+    if run_bench:
+        with st.spinner("Running the page-ranking heuristics on the supplied PDFs..."):
+            try:
+                st.session_state.research_benchmark = run_research_benchmark(BENCHMARK_DATASET)
+            except (FileNotFoundError, ValueError) as exc:
+                st.error(str(exc))
+            else:
+                st.success("Benchmark completed. These results apply only to this corpus and run.")
 
-    with st.expander("⚠️ Failure Case 1: Sub-Pixel Micro-Fonts & Footnotes (<6pt Text)", expanded=False):
+    b_data = st.session_state.get("research_benchmark")
+    if b_data:
+        metric_rows = []
+        systems = [
+            ("PDF text overlap", b_data["text_overlap_metrics"]),
+            ("Page-layout heuristic", b_data["layout_metrics"]),
+            ("Keyword baseline", b_data["keyword_metrics"]),
+        ]
+        for label, metrics in systems:
+            metric_rows.append({
+                "Heuristic": label,
+                "Recall@1 (%)": metrics["recall@1"],
+                "Recall@3 (%)": metrics["recall@3"],
+                "Recall@5 (%)": metrics["recall@5"],
+                "MRR": metrics["mrr"],
+                "Mean search time (ms)": metrics["latency_avg_ms"],
+                "P95 search time (ms)": metrics["latency_p95_ms"],
+            })
+        st.dataframe(pd.DataFrame(metric_rows), use_container_width=True, hide_index=True)
+        st.caption(
+            "Search timing covers only the in-memory ranking call. It excludes PDF "
+            "rendering/text extraction, indexing, model inference, and Streamlit UI time."
+        )
+        st.dataframe(pd.DataFrame(b_data.get("detailed_rows", [])), use_container_width=True, hide_index=True)
+
+    with st.expander("Known limitations and future work"):
         st.markdown("""
-        * **Empirical Trigger:** In corporate 10-K filings, auditor footnotes and disclaimer clauses often appear in 5pt or 6pt font at the bottom of the page.
-        * **Root Cause:** In standard 144 DPI rasterization, characters in 5pt fonts occupy fewer than 4x4 pixels, blurring token patch boundaries in SigLIP/PaliGemma vision backbones.
-        * **Engineering Mitigation:** **Hierarchical Patch Pyramids.** When fine-print density exceeds a visual frequency threshold, the visual engine automatically triggers dynamic 288 DPI quad-tree patch rendering over the lower-quadrant bounding box.
-        """)
+        **Implemented:** PDF page rendering, embedded-text extraction, token/synonym overlap ranking, and optional image-based answering through configured vision-model providers.
 
-    with st.expander("⚠️ Failure Case 2: Skewed, Glared & Low-DPI Mobile Scans", expanded=False):
-        st.markdown("""
-        * **Empirical Trigger:** Receipts or physical invoices photographed with smartphone cameras with geometric perspective distortion or uneven lighting glare.
-        * **Root Cause:** Severe affine tilt (>15 degrees) misaligns horizontal patch grids, reducing late-interaction MaxSim cross-attention alignment.
-        * **Engineering Mitigation:** **Pre-Attention Homography Normalization.** A lightweight OpenCV Radon transform detects dominant text lines and applies automatic affine rectification and adaptive thresholding prior to patch embedding.
+        **Not implemented:** ColPali embeddings or MaxSim, a CLIP model baseline, BM25, RAGAS evaluation of answers produced by this app, OCR for scanned PDFs, automatic page deskewing, high-resolution region crops, and automated grounding verification. These remain future work.
         """)
-
-    with st.expander("⚠️ Failure Case 3: Longitudinal Multi-Page Reasoning (Cross-Page Calculations)", expanded=False):
-        st.markdown("""
-        * **Empirical Trigger:** Queries requiring calculations spanning separate years located on distinct pages (e.g. *'Compare FY22 margin on Page 1 with FY24 margin on Page 3'*).
-        * **Root Cause:** Standard Top-K page retrieval returns isolated screenshots. If top_k=1, the model only receives one page of the required comparison pair.
-        * **Engineering Mitigation:** **Multi-Page Sliding Context Fusion.** By setting Top-K >= 3 and concatenating multi-page late-interaction patch activations into a cross-page attention window, the VLM performs multi-hop visual reasoning across both target documents.
-        """)
-
-    with st.expander("⚠️ Failure Case 4: Dense Multi-Series Continuous Line Graphs", expanded=False):
-        st.markdown("""
-        * **Empirical Trigger:** Scientific or algorithmic plots containing 8+ overlapping dashed lines with identical hue and tiny legend dots.
-        * **Root Cause:** While ColPali retrieves the correct page (100% chart recall), visual language models occasionally misattribute values between overlapping curves without explicit coordinate ticks.
-        * **Engineering Mitigation:** **Visual Chain-of-Thought (V-CoT) & Axis Calibration.** The generator prompt instructs the VLM to execute a two-step visual reasoning protocol: (1) localize axis ticks, (2) trace curve continuity sequentially before emitting numeric estimates.
-        """)
-
-    with st.expander("⚠️ Failure Case 5: VLM Hallucination & Unsupported Metric Extrapolation", expanded=False):
-        st.markdown("""
-        * **Empirical Trigger:** The user asks for a quarterly metric (e.g. *'Q2 revenue'*) on a document that only displays Q3 data.
-        * **Root Cause:** Autoregressive language decoders exhibit prior probability bias, occasionally hallucinating plausible numbers when specific ground-truth cells are absent.
-        * **Engineering Mitigation:** **Grounding Verification Guardrails.** A post-generation token alignment filter compares extracted entities against the indexed visual patch dictionary; unverified tokens are flagged and redacted with a grounding disclaimer.
-        """)
-
-    st.markdown("</div>", unsafe_allow_html=True)

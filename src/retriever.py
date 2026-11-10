@@ -1,22 +1,15 @@
-"""
-src/retriever.py - High-Performance Multimodal Document Retriever.
-Features:
-1. 'Turbo Visual Engine': Sub-second visual patch late-interaction indexing & 15ms search.
-2. Stopword filtering, domain synonym expansion (e.g. 'bill' -> 'invoice'), and content-density tie-breaking.
-"""
+"""PDF text extraction and keyword-overlap page ranking."""
 
-import os
 import re
 import time
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image
 import pypdfium2 as pdfium
-from src.pdf_processor import PDFProcessor
 
 
 class ResultStub:
-    """Standardized result object matching Byaldi result signature."""
+    """Small result record used by the Streamlit page-search UI."""
     def __init__(self, page_num: int, score: float, base64_img: str = None):
         self.page_num = page_num
         self.score = score
@@ -40,16 +33,13 @@ SYNONYMS = {
 }
 
 
-class TurboVisualIndex:
-    """
-    Sub-second Visual Patch Late-Interaction Engine.
-    Preserves 2D layout geometry and multi-column document hierarchy without CPU lag.
-    """
+class KeywordPageIndex:
+    """In-memory page text/token index with a simple overlap scoring heuristic."""
     def __init__(self):
         self.pages_data = [] # List of dicts with page_num, image, tokens, text
 
     def build_index(self, pdf_path: str, max_pages: int = 15):
-        """Builds visual patch index in ~0.5s with optimized memory footprint."""
+        """Renders page images for display and extracts embedded PDF text."""
         pdf_path = Path(pdf_path)
         self.pages_data = []
         try:
@@ -57,11 +47,11 @@ class TurboVisualIndex:
                 total = min(len(pdf), max_pages) if max_pages > 0 else len(pdf)
                 for i in range(total):
                     page = pdf[i]
-                    # 1. Render high-res screenshot (scale=1.2 is crisp and 2x faster than 1.5)
+                    # Render page images for the UI and optional vision-model answering.
                     bitmap = page.render(scale=1.2)
                     pil_img = bitmap.to_pil().convert("RGB")
                     
-                    # 2. Extract visual text & spatial blocks (Zero layout loss)
+                    # Retrieval uses extracted text; it does not use image embeddings.
                     textpage = page.get_textpage()
                     raw_text = textpage.get_text_range().strip()
                     tokens = set(re.findall(r'\b[a-zA-Z0-9_\-\.\$\%\/]+\b', raw_text.lower()))
@@ -72,12 +62,12 @@ class TurboVisualIndex:
                         "tokens": tokens,
                         "text": raw_text
                     })
-            print(f"[Turbo Engine] Successfully indexed {len(self.pages_data)} pages in <0.5s.")
+            print(f"[PDF index] Extracted text from {len(self.pages_data)} pages.")
         except Exception as e:
             print(f"[Turbo Engine] Error building index: {e}")
 
     def search(self, query: str, top_k: int = 1) -> List[Any]:
-        """Late-interaction MaxSim scoring across visual page patches in 15ms."""
+        """Rank pages by token and synonym overlap; this is not visual retrieval."""
         raw_words = re.findall(r'\b[a-zA-Z0-9_\-\.\$\%\/]+\b', query.lower())
         
         # Filter stopwords
@@ -96,13 +86,13 @@ class TurboVisualIndex:
             tokens = page["tokens"]
             page_text = page["text"].lower()
             
-            # Late-interaction MaxSim token alignment
+            # Heuristic token overlap (not a learned embedding or MaxSim).
             sim_score = 0.0
             for qw in expanded_query:
                 if qw in tokens:
-                    sim_score += 4.0 # Exact visual token match
+                    sim_score += 4.0
                 elif any(qw in t for t in tokens):
-                    sim_score += 1.8 # Partial sub-patch match
+                    sim_score += 1.8
                 elif qw in page_text:
                     sim_score += 1.2
 
@@ -110,8 +100,7 @@ class TurboVisualIndex:
             content_density = min(len(tokens) / 30.0, 3.0)
             final_raw = sim_score + content_density
 
-            # Scale to standard ColPali MaxSim score range (18.0 - 32.0)
-            normalized_score = 20.0 + min(final_raw * 1.5, 12.0)
+            normalized_score = final_raw
             scored_pages.append((normalized_score, page))
 
         # Sort descending by score
@@ -149,7 +138,7 @@ class TurboVisualIndex:
                     sim_score += 1.2
             content_density = min(len(tokens) / 30.0, 3.0)
             final_raw = sim_score + content_density
-            score = round(20.0 + min(final_raw * 1.5, 12.0), 2)
+            score = round(final_raw, 2)
             snippet = p["text"][:80].replace("\n", " ").strip() if p["text"] else "Visual Chart / Table"
             all_page_metrics.append({
                 "page_num": p["page_num"],
@@ -161,17 +150,11 @@ class TurboVisualIndex:
 
 
 
-class ColPaliRetriever:
-    def __init__(self, model_name: str = "vidore/colpali-v1.2", index_root: str = ".byaldi"):
-        self.model_name = model_name
-        self.index_root = Path(index_root)
-        self.index_root.mkdir(parents=True, exist_ok=True)
-        
-        # High-performance Turbo Visual Engine (Sub-second execution)
-        self.turbo_engine = TurboVisualIndex()
+class TextOverlapRetriever:
+    def __init__(self):
+        self.page_index = KeywordPageIndex()
         self.active_pdf_path = None
         self.is_indexed = False
-        self._query_cache = {}
 
     def index_documents(self, input_path: str, max_pages: int = 15, overwrite: bool = True):
         """
@@ -181,12 +164,11 @@ class ColPaliRetriever:
         if not input_path.exists():
             raise FileNotFoundError(f"Document not found at: {input_path}")
 
-        print(f"[Retriever] Indexing '{input_path.name}' with Turbo Visual Engine (<1s)...")
+        print(f"[Retriever] Extracting text from '{input_path.name}'...")
         start = time.time()
-        self.turbo_engine.build_index(str(input_path), max_pages=max_pages)
+        self.page_index.build_index(str(input_path), max_pages=max_pages)
         self.active_pdf_path = str(input_path)
         self.is_indexed = True
-        self._query_cache.clear()
         print(f"[Retriever] Complete in {time.time() - start:.2f}s!")
 
     def load_index_for_file(self, filename: str, max_pages: int = 15) -> bool:
@@ -205,33 +187,27 @@ class ColPaliRetriever:
 
     def search(self, query: str, top_k: int = 1) -> List[Any]:
         """
-        Performs late-interaction search in ~15 milliseconds.
+        Runs a keyword-overlap search against the indexed page text.
         """
         if not self.is_indexed:
             raise RuntimeError("No document is indexed. Please index a PDF first.")
 
-        cache_key = f"{query.strip().lower()}_{top_k}"
-        if cache_key in self._query_cache:
-            return self._query_cache[cache_key]
-
-        results = self.turbo_engine.search(query=query, top_k=top_k)
-        self._query_cache[cache_key] = results
-        return results
+        return self.page_index.search(query=query, top_k=top_k)
 
     def search_all_pages(self, query: str) -> List[Dict[str, Any]]:
         """Returns all page scores for dashboard charts."""
         if not self.is_indexed:
             return []
-        return self.turbo_engine.search_all_pages(query)
+        return self.page_index.search_all_pages(query)
 
     def get_all_pages_info(self) -> List[Dict[str, Any]]:
         """Returns info on all indexed pages for dashboard."""
         info = []
-        for p in self.turbo_engine.pages_data:
+        for p in self.page_index.pages_data:
             snippet = p["text"][:80].replace("\n", " ").strip() if p["text"] else "Visual Chart / Table"
             info.append({
                 "page_num": p["page_num"],
-                "score": 20.0 + min(len(p["tokens"]) / 10.0, 6.0),
+                "score": float(len(p["tokens"])),
                 "tokens": len(p["tokens"]),
                 "snippet": snippet
             })
@@ -240,7 +216,7 @@ class ColPaliRetriever:
 
     def get_page_image(self, page_num: int) -> Image.Image:
         """Returns the high-res screenshot for a specific page directly from memory (0ms)."""
-        for p in self.turbo_engine.pages_data:
+        for p in self.page_index.pages_data:
             if p["page_num"] == page_num:
                 return p["image"]
         # Fallback render of requested page only
@@ -256,11 +232,11 @@ class ColPaliRetriever:
 
     def get_page_text(self, page_num: int) -> str:
         """Returns extracted text for a page directly from memory (0ms)."""
-        for p in self.turbo_engine.pages_data:
+        for p in self.page_index.pages_data:
             if p["page_num"] == page_num:
                 return p.get("text", "")
         return ""
 
     def get_all_doc_text(self) -> str:
         """Returns all indexed text combined from memory (0ms)."""
-        return " ".join(p.get("text", "") for p in self.turbo_engine.pages_data)
+        return " ".join(p.get("text", "") for p in self.page_index.pages_data)

@@ -1,7 +1,7 @@
 """
 src/generator.py - Multimodal Answer Generation.
 Supports:
-1. 'fast_demo' - Instant (<0.5s) silky streaming with comprehensive executive briefings for ANY PDF.
+1. 'fast_demo' - Document-specific demo templates streamed in chunks (not LLM output).
 2. 'ollama' - Local on-device vision model (LLaVA / Qwen2-VL).
 3. 'gemini' - Cloud multimodal API (sub-second high-accuracy vision).
 """
@@ -42,7 +42,7 @@ class MultimodalGenerator:
         **kwargs
     ) -> Generator[str, None, None]:
         """
-        Streams answers grounded in the provided page screenshots.
+        Streams answers conditioned on the provided page screenshots.
         """
         if "target_page" in kwargs:
             target_page = kwargs["target_page"]
@@ -72,7 +72,7 @@ class MultimodalGenerator:
         target_page: int = 1,
         retriever: Any = None
     ) -> Generator[str, None, None]:
-        """Instant streaming generator providing rich, query-grounded executive briefings in <0.2s."""
+        """Stream document-specific demonstration templates; this mode does not call an LLM."""
         q_lower = query.lower()
         page_num = target_page
 
@@ -284,7 +284,7 @@ class MultimodalGenerator:
                 f"### 🔑 Key Academic Insights & Content on Page {page_num}:\n"
                 f"{bullets_str}\n\n"
                 f"---\n\n"
-                f"🔍 *Visual Grounding:* Localized via visual late-interaction layout patches on **Page {page_num}**."
+                f"🔍 *Page reference:* Selected by the prototype text-overlap retriever (**Page {page_num}**)."
             )
 
         # =========================================================================
@@ -347,7 +347,7 @@ class MultimodalGenerator:
                 f"### 🔑 Extracted Insights from Page {page_num}:\n"
                 f"{bullets_str}\n\n"
                 f"---\n\n"
-                f"🔍 *Visual Grounding:* Localized via visual layout patch alignment on **Page {page_num}**."
+                f"🔍 *Page reference:* Selected by the prototype text-overlap retriever (**Page {page_num}**)."
             )
 
 
@@ -375,7 +375,7 @@ class MultimodalGenerator:
                 if "message" in chunk and "content" in chunk["message"]:
                     yield chunk["message"]["content"]
         except Exception as e:
-            yield f"\n[Ollama error: {str(e)}. Tip: Switch to '⚡ Fast Demo Mode' in the sidebar for instant CPU response.]"
+            yield f"\n[Ollama error: {str(e)}. The Fast Demo Templates option does not call an LLM.]"
 
     def _stream_gemini(self, query: str, images: List[Image.Image]) -> Generator[str, None, None]:
         """Streams from Gemini Vision API."""

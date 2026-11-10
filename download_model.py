@@ -42,7 +42,8 @@ try:
     print(f"SUCCESS: {model_id} is downloaded and cached locally!")
     print(f"Cache location: {local_dir}")
     print("=" * 60)
-    print("\nYou can now run your app without waiting:")
+    print("\nThis only downloads model files; the current app does not load ColPali.")
+    print("Run the app with its currently supported engines using:")
     print("   streamlit run app.py")
     print("=" * 60)
 except Exception as e:

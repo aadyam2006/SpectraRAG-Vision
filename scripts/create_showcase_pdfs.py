@@ -2,10 +2,12 @@
 create_showcase_pdfs.py - Generates beautiful showcase PDFs for instant testing.
 """
 import os
+from pathlib import Path
 from PIL import Image, ImageDraw
 
 def create_tesla_pdf():
-    pdf_path = "tesla_q3_operational_highlights.pdf"
+    project_root = Path(__file__).resolve().parents[1]
+    pdf_path = project_root / "tesla_q3_operational_highlights.pdf"
     img1 = Image.new("RGB", (800, 1000), color=(255, 255, 255))
     draw1 = ImageDraw.Draw(img1)
 
@@ -49,7 +51,9 @@ def create_tesla_pdf():
         y += 42
 
     img1.save(pdf_path)
-    img1.save(os.path.join("data", "input_pdfs", pdf_path))
+    input_dir = project_root / "data" / "input_pdfs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    img1.save(input_dir / pdf_path.name)
     print(f"Created {pdf_path}")
 
 if __name__ == "__main__":

@@ -1,1 +1,1 @@
-"""ColPali Multimodal RAG package."""
+"""SpectraRAG Vision PDF Q&A prototype."""
